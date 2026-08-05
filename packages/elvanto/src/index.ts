@@ -123,6 +123,13 @@ export {
 } from './schemas/people.js'
 
 export {
+  demographicSchema,
+  departmentSchema,
+  type Demographic,
+  type Department,
+} from './schemas/common.js'
+
+export {
   groupMemberSchema,
   groupSchema,
   type Group,

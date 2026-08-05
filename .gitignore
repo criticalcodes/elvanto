@@ -10,3 +10,5 @@ dist/
 .vitest/
 coverage/
 *.tgz
+# Sweep output: contains redacted but still account-specific structure.
+report*.json

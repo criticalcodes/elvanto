@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { dateString, id, reference, wrapped } from '../zod-helpers.js'
+import { demographicSchema, departmentSchema } from './common.js'
 import { personReferenceSchema } from './people.js'
 
 /** A group member: a person reference plus their role in the group. */
@@ -36,12 +37,12 @@ export const groupSchema = z.looseObject({
   meeting_frequency: z.string().optional(),
 
   // The five documented optional fields, returned only when named in `fields`.
-  // The singular keys here are inferred: the documentation names each field but
-  // shows no populated example payload.
+  // All confirmed against a live account, including the sub-collections nested
+  // inside departments and demographics.
   people: wrapped('person', groupMemberSchema).optional(),
   categories: wrapped('category', reference).optional(),
-  departments: wrapped('department', reference).optional(),
-  demographics: wrapped('demographic', reference).optional(),
+  departments: wrapped('department', departmentSchema).optional(),
+  demographics: wrapped('demographic', demographicSchema).optional(),
   locations: wrapped('location', reference).optional(),
 })
 

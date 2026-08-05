@@ -156,7 +156,7 @@ function paramsFor(id: EndpointId): Record<string, unknown> | 'skip' {
       // person alphabetically.
       return { page_size: 100, fields: PERSON_OPTIONAL_FIELDS }
     case 'people.search':
-      return { page_size: 10, search: { archived: 'no' } }
+      return { page_size: 10, search: { archived: 'no' }, fields: PERSON_OPTIONAL_FIELDS }
     case 'people.getInfo':
       // `family` and `reports_to` are documented as retrieve-only, so they appear
       // here but not on getAll.
@@ -192,7 +192,12 @@ function paramsFor(id: EndpointId): Record<string, unknown> | 'skip' {
     case 'songs.keys.getInfo':
       return requireId('keyId', { files: true })
     case 'calendar.events.getAll':
-      return { page_size: 10, start: fmt(yearAgo), end: fmt(today) }
+      return {
+        page_size: 10,
+        start: fmt(yearAgo),
+        end: fmt(today),
+        fields: ['locations', 'assets', 'register_url'],
+      }
     case 'peopleFlows.steps.getAll':
       return requireId('flowId', {}, 'flow_id')
     case 'peopleFlows.steps.people':
@@ -310,6 +315,11 @@ function harvest(id: EndpointId, result: unknown): void {
         }))
         .sort((a, b) => b.score - a.score)
       rememberFrom('serviceId', scored[0]?.record['id'])
+      if (scored[0]) {
+        process.stderr.write(
+          `        chose the service with the most detail (score ${scored[0].score})\n`,
+        )
+      }
       break
     }
     case 'songs.getAll':
@@ -393,7 +403,10 @@ function compareFields(
 
 /** Strips values, keeping structure, so real member data is not printed. */
 function redact(value: unknown, depth = 0): unknown {
-  if (depth > 4) return '…'
+  // Deep enough to reveal a wrapper nested inside a collection item, e.g.
+  // departments[0].sub_departments.sub_department[0] — the previous limit cut off
+  // exactly there and hid a real shape.
+  if (depth > 7) return '…'
   if (Array.isArray(value)) {
     return value.length === 0 ? [] : [redact(value[0], depth + 1), `…${value.length} total`]
   }

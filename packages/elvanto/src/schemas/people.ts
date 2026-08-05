@@ -7,14 +7,7 @@ import {
   reference,
   wrapped,
 } from '../zod-helpers.js'
-
-/**
- * A relation Elvanto may return either as `{id, name}` or as a bare name string.
- *
- * Used where no read example is documented and the write form is a plain name, so
- * either is plausible.
- */
-const referenceOrName = z.union([reference, z.string()])
+import { demographicSchema, departmentSchema } from './common.js'
 
 /** A member of someone's family, as returned by the `family` field. */
 export const familyMemberSchema = z.looseObject({
@@ -109,17 +102,15 @@ export const personSchema = z.looseObject({
   home_postcode: z.string().optional(),
   home_country: z.string().optional(),
 
+  // All five confirmed against a live account: {id, name} objects under the
+  // singular key, with departments carrying nested sub-departments. Earlier
+  // versions hedged on a bare-name form, which the documentation's write examples
+  // suggested but a real account does not return.
   locations: wrapped('location', reference).optional(),
-  // Provisionally tolerant. Elvanto publishes no read example for these four and
-  // writes them as bare name strings ("Worship Team||Band||Guitar"), so both that
-  // and the usual {id, name} are accepted — a hard failure on a documented-
-  // plausible shape would be worse than a slightly wider type. `pnpm smoke`
-  // against a record that has them will show which form is real, and this can
-  // then be narrowed.
-  departments: wrapped('department', referenceOrName).optional(),
-  demographics: wrapped('demographic', referenceOrName).optional(),
-  service_types: wrapped('service_type', referenceOrName).optional(),
-  access_permissions: wrapped('access_permission', referenceOrName).optional(),
+  departments: wrapped('department', departmentSchema).optional(),
+  demographics: wrapped('demographic', demographicSchema).optional(),
+  service_types: wrapped('service_type', reference).optional(),
+  access_permissions: wrapped('access_permission', reference).optional(),
   family: optionalReference(familySchema),
   reports_to: z.string().optional(),
 })

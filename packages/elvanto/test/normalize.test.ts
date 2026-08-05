@@ -191,10 +191,10 @@ describe('shapes confirmed against a live account', () => {
     expect(person.family?.family_member?.[0]?.relationship).toBe('Spouse')
   })
 
-  test('accepts the inferred person collections in either documented form', async () => {
-    // No read example is published for these, and Elvanto writes them as bare
-    // name strings, so both that and {id, name} must parse. A wrong singular key
-    // is survivable too, via the single-key fallback.
+  test('flattens the sub-collections nested inside departments', async () => {
+    // Confirmed on a live account: a department carries its sub-departments in
+    // another singular-key wrapper. Rule 1 says wrappers get flattened, so this
+    // one does too — leaving it XML-shaped one level down would be inconsistent.
     const { client } = testClient([
       {
         body: {
@@ -202,9 +202,32 @@ describe('shapes confirmed against a live account', () => {
           person: [
             {
               id: 'p1',
-              departments: { department: [{ id: 'd1', name: 'Music' }] },
-              demographics: { demographic: ['Adults'] },
-              service_types: { some_other_key: [{ id: 'st1', name: 'Sunday' }] },
+              departments: {
+                department: [
+                  {
+                    id: 'd1',
+                    name: 'Music',
+                    sub_departments: {
+                      sub_department: [
+                        { id: 'sd1', name: 'Vocals' },
+                        { id: 'sd2', name: 'Band' },
+                      ],
+                    },
+                  },
+                  // A department with no sub-departments, sent as "".
+                  { id: 'd2', name: 'Tech', sub_departments: '' },
+                ],
+              },
+              demographics: {
+                demographic: [
+                  {
+                    id: 'dm1',
+                    name: 'Adults',
+                    sub_demographics: { sub_demographic: [{ id: 'sdm1', name: '30s' }] },
+                  },
+                ],
+              },
+              service_types: { service_type: [{ id: 'st1', name: 'Sunday' }] },
               access_permissions: '',
             },
           ],
@@ -213,10 +236,29 @@ describe('shapes confirmed against a live account', () => {
     ])
 
     const person = await client.people.getInfo({ id: 'p1' })
-    expect(person.departments).toEqual([{ id: 'd1', name: 'Music' }])
-    expect(person.demographics).toEqual(['Adults'])
+    expect(person.departments?.[0]?.sub_departments).toEqual([
+      { id: 'sd1', name: 'Vocals' },
+      { id: 'sd2', name: 'Band' },
+    ])
+    expect(person.departments?.[1]?.sub_departments).toEqual([])
+    expect(person.demographics?.[0]?.sub_demographics).toEqual([{ id: 'sdm1', name: '30s' }])
     expect(person.service_types).toEqual([{ id: 'st1', name: 'Sunday' }])
     expect(person.access_permissions).toEqual([])
+  })
+
+  test('survives a wrong singular key via the single-key fallback', async () => {
+    const { client } = testClient([
+      {
+        body: {
+          status: 'ok',
+          person: [
+            { id: 'p1', service_types: { some_other_key: [{ id: 'st1', name: 'Sunday' }] } },
+          ],
+        },
+      },
+    ])
+    const person = await client.people.getInfo({ id: 'p1' })
+    expect(person.service_types).toEqual([{ id: 'st1', name: 'Sunday' }])
   })
 
   test('reads a People Flow step due rule, including its days', async () => {
