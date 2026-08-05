@@ -1,0 +1,50 @@
+{
+  "name": "@criticalcodes/elvanto-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing the Elvanto church management API as tools",
+  "license": "MIT",
+  "homepage": "https://github.com/criticalcodes/elvanto#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/criticalcodes/elvanto.git",
+    "directory": "packages/elvanto-mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/criticalcodes/elvanto/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "elvanto-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "elvanto",
+    "church",
+    "api",
+    "mcp",
+    "model-context-protocol",
+    "chms"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@criticalcodes/elvanto": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "zod": "^4.4.3"
+  }
+}

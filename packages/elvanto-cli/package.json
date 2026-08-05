@@ -1,0 +1,46 @@
+{
+  "name": "@criticalcodes/elvanto-cli",
+  "version": "0.1.0",
+  "description": "Command-line interface for the Elvanto church management API",
+  "license": "MIT",
+  "homepage": "https://github.com/criticalcodes/elvanto#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/criticalcodes/elvanto.git",
+    "directory": "packages/elvanto-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/criticalcodes/elvanto/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "elvanto": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "elvanto",
+    "church",
+    "api",
+    "cli",
+    "chms"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "@criticalcodes/elvanto": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

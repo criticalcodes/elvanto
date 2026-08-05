@@ -1,0 +1,220 @@
+# Elvanto for TypeScript
+
+Three things that share one source of truth, for the [Elvanto](https://www.elvanto.com)
+church management API:
+
+| Package | What it is | Install |
+| --- | --- | --- |
+| [`@criticalcodes/elvanto`](packages/elvanto) | Typed TypeScript/JavaScript client | `npm i @criticalcodes/elvanto` |
+| [`@criticalcodes/elvanto-cli`](packages/elvanto-cli) | Command-line interface | `npm install -g @criticalcodes/elvanto-cli` |
+| [`@criticalcodes/elvanto-mcp`](packages/elvanto-mcp) | MCP server, for LLM tools | `npx @criticalcodes/elvanto-mcp` |
+
+This version covers **API key authentication** and **read-only endpoints** — all
+25 of them. OAuth and mutations are designed for but not implemented; see
+[Roadmap](#roadmap).
+
+> Unofficial. Not affiliated with or endorsed by Elvanto.
+
+```ts
+import { createClient } from '@criticalcodes/elvanto'
+
+const elvanto = createClient({ auth: { apiKey: process.env.ELVANTO_API_KEY! } })
+
+const people = await elvanto.people.getAll({ page_size: 100, fields: ['birthday'] })
+console.log(people.total, people.items[0]?.firstname)
+```
+
+```console
+$ elvanto services get-all --fields songs --all
+$ elvanto people search --search lastname=Smith -o json
+```
+
+## One registry, three surfaces
+
+Every endpoint is declared once, in
+[`packages/elvanto/src/registry.ts`](packages/elvanto/src/registry.ts): its path,
+its zod parameter schema, its response schema, and its documentation link. The
+SDK methods, the CLI commands and the MCP tools are all derived from it, so a
+parameter cannot exist on one surface and be missing from another.
+
+Names are derived mechanically, so each surface reads idiomatically rather than
+leaking Elvanto's camelCase paths:
+
+| Surface | Convention | Example |
+| --- | --- | --- |
+| TypeScript | camelCase | `client.peopleFlows.steps.getAll()` |
+| CLI | kebab-case | `elvanto people-flows steps get-all` |
+| MCP | snake_case | `elvanto_people_flows_steps_get_all` |
+
+Adding an endpoint means adding one registry entry and one binding line in
+`client.ts`. The CLI and MCP server pick it up with no further work.
+
+## Response normalization
+
+Elvanto's JSON is a mechanical translation of an XML document, which shows. This
+library reshapes it on the way out, consistently and predictably:
+
+1. **Singular-key collection wrappers are flattened.**
+   `{ locations: { location: [...] } }` becomes `{ locations: [...] }`.
+   An empty collection (Elvanto sends `""`) becomes `[]`. An absent one stays
+   `undefined` — so you can tell "none" from "not requested".
+2. **Single records are unwrapped**, whether Elvanto sent a one-element array
+   (`person: [{...}]`, most endpoints) or a bare object (`transaction: {...}`,
+   the financial endpoints).
+3. **Pagination is lifted** into `{ items, page, perPage, onThisPage, total, hasMore }`.
+4. **Documented booleans become booleans.** `1`/`0`, `"Yes"`/`"No"`,
+   `"true"`/`"false"` and `""` all normalize. Elvanto's *numeric states* — like
+   a service's `status` — are deliberately left alone, because `1` there means
+   "published", not "true".
+5. **Inconsistently quoted numbers become numbers.** The same field arrives as
+   `125` from one endpoint and `"360.00"` from another.
+6. **Everything else is verbatim, and unknown fields are always preserved** —
+   accounts have custom fields, and Elvanto ships changes ahead of its docs.
+
+Dates stay as Elvanto's strings, because converting them would lose fidelity.
+Use `parseElvantoDate()`, which knows that Elvanto's `"2026-02-24 11:56:22"` is
+UTC despite carrying no zone marker (`new Date()` would read it as local time).
+
+## Response validation
+
+Elvanto publishes no OpenAPI or JSON Schema. Every response schema here is
+derived from the examples in its documentation, which means the schemas can be
+wrong in two directions: fields that exist but aren't documented, and documented
+fields that behave differently in practice.
+
+So validation is configurable, and **strict by default**:
+
+| Mode | Behaviour | Use it when |
+| --- | --- | --- |
+| `throw` (default) | Raises `ElvantoResponseValidationError` on a mismatch. The raw payload is on `error.data`. | Tests and CI — you want drift to be loud. |
+| `warn` | Returns the data anyway and reports through `onWarning`. | Production, where a new Elvanto field must not break a working call. |
+| `off` | Skips response validation. Structural normalization still applies. | Maximum throughput, or when you've decided to trust it. |
+
+```ts
+createClient({ validate: 'warn', onWarning: (w) => log.warn(w.message) })
+```
+
+Every surface exposes the opt-out: `--validate warn` on the CLI,
+`ELVANTO_VALIDATE=warn` for the MCP server and the SDK.
+
+Request parameters are always validated strictly, regardless of this setting —
+those are well documented, so a bad parameter is your bug, not Elvanto's.
+
+## Debug logging
+
+Off by default. `debug: true` (or `ELVANTO_DEBUG=1`) logs requests, HTTP status,
+durations, retries and result counts to **stderr** — never stdout, so it can't
+corrupt piped CLI output or the MCP stdio channel.
+
+```console
+$ elvanto people get-all --debug
+[elvanto] request people/getAll — POST url=… bytes=16 params=page_size
+[elvanto] response people/getAll — HTTP 200 durationMs=142 attempt=1 generatedIn=0.021
+[elvanto] result people.getAll — page returned=25 total=668 page=1 hasMore=true
+```
+
+Because this library handles member records and giving data, the log stream is
+treated as somewhere that data must not reach:
+
+- **Credentials are never logged**, at any level, in any encoding.
+- **Returned records are never logged** — only counts, statuses and timings. When
+  you need a payload to diagnose a mismatch, use `validate: 'warn'` and read it
+  from the warning.
+- **Parameter values are only logged with `debug: 'verbose'`**; names alone are
+  logged otherwise. Even in verbose, `search` values are redacted to a count,
+  since those are the terms themselves.
+
+Pass `logger` to route events into your own logging stack instead of stderr.
+
+## Verifying against a real account
+
+Because the schemas come from documentation examples, the honest way to check
+them is to call the API. The smoke test sweeps every read-only endpoint, chains
+IDs from one call into the next, and reports what it finds:
+
+Credentials come from a `.env` in the repository root (copy `.env.example`), or
+from the environment, which takes precedence:
+
+```console
+$ cp .env.example .env && $EDITOR .env   # then just:
+$ pnpm smoke
+
+$ ELVANTO_API_KEY=your-key pnpm smoke    # or pass it directly
+  ok    people.getAll  (+1 undocumented)
+  ok    people.search
+  skip  people.currentUser
+  …
+24 ok, 1 skipped, 0 API errors, 0 failed
+
+Fields Elvanto returned that our schemas do not declare:
+  people.getAll: brand_new_field_from_elvanto
+```
+
+It reports **fields Elvanto returned that we don't declare** (the docs were
+incomplete) and **fields we declare that never appeared** (we may be wrong).
+Values are redacted by default — this reads real member data. Add
+`--include-data` for samples, `--financial` to include giving records (excluded
+by default), and `--json report.json` for the full report.
+
+Every endpoint's parameters and response shape has been checked against Elvanto's
+published example payloads. A handful of sub-collections are the exception, and
+are the main thing this sweep exists to settle: `departments`, `demographics`,
+`service_types`, `access_permissions` and `family` on a person, and the group
+sub-collections. Elvanto names those fields but never shows one populated, so both
+the wrapper key and the item shape are inferred. They fail loudly rather than
+returning empty data, so the sweep will say so.
+
+## Development
+
+```console
+pnpm install
+pnpm build          # all three packages
+pnpm typecheck      # includes compile-time type assertions
+pnpm test           # 258 tests, no network
+pnpm test:coverage
+pnpm smoke          # live sweep, needs a real API key
+```
+
+Tests never touch the network: the SDK takes an injected `fetch`, and the CLI and
+MCP tests run against a local stub server and an in-memory MCP transport
+respectively, so they exercise real sockets and the real protocol.
+
+Both `pnpm test` and `pnpm typecheck` resolve `@criticalcodes/elvanto` to the
+SDK's **source**, not its build output — via an alias in `vitest.config.ts` and
+`paths` in the two consuming tsconfigs. Without that, a change to the SDK stays
+invisible to two thirds of the suite until someone runs `pnpm build`, and the
+tests pass against the previous build.
+
+## Roadmap
+
+Deliberately not in this version:
+
+- **OAuth 2.** The transport already supports bearer tokens and a
+  `getAccessToken` hook for refresh, so the remaining work is the authorization
+  code flow and token storage. `people.currentUser` is registered and will start
+  working the moment a token is supplied.
+- **Mutations.** `create`, `edit`, `remove`, `addPerson` and the rest. The
+  registry has no `method` field yet because every endpoint here is a POST that
+  reads; adding writes should also add an explicit opt-in, so an MCP server
+  cannot be handed the ability to delete a person by accident.
+
+## Notes on the API itself
+
+Things worth knowing, all of which this library handles for you:
+
+- Every endpoint is a `POST`, including the reads.
+- API keys authenticate as HTTP Basic with the key as the username and an ignored
+  password.
+- Failures sometimes arrive as HTTP 200 with `{"status":"fail"}` in the body, and
+  the meaningful code is in `error.code` rather than the status line.
+- A 404 means both "that ID doesn't exist" and "nothing matched your filters".
+  `client.paginate()` treats the latter as an empty result rather than an error.
+- `page_size` must be between 10 and 1000. Elvanto's default is 1000; the MCP
+  server defaults to 25 instead, so a large account can't flood a model's context.
+- Optional fields are only returned when named in a request's `fields` parameter.
+  Use `people.customFields.getAll()` to discover the `custom_<uuid>` keys your
+  account accepts.
+
+## License
+
+MIT

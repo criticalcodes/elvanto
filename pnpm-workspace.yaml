@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+allowBuilds:
+  # Required by tsup and vitest, which bundle via esbuild.
+  esbuild: true
+minimumReleaseAgeExclude:
+  - tsx@4.23.7

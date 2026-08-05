@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Typechecking only — tsup produces the build, so no rootDir/outDir here.
+    "noEmit": true,
+    // Resolve the SDK to its source rather than its build output, matching the
+    // alias in vitest.config.ts. Without this, `pnpm typecheck` silently depends
+    // on a prior `pnpm build` and reports stale or missing types. Affects
+    // typechecking only: at runtime Node resolves the real package.
+    "paths": {
+      "@criticalcodes/elvanto": ["../elvanto/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
