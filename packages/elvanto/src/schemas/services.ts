@@ -146,7 +146,8 @@ export type ServiceNote = z.output<typeof serviceNoteSchema>
  */
 export const serviceSchema = z.looseObject({
   id: id,
-  status: z.unknown().optional(),
+  /** Elvanto's own state, not a boolean: 1 published, 0 draft. */
+  status: numericOptional,
   date_added: dateString.optional(),
   date_modified: dateString.optional(),
   name: z.string().optional(),

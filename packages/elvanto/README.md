@@ -119,11 +119,25 @@ createClient({
   logger: (event) => …,        // route log events into your own stack
   timeoutMs: 30_000,
   maxRetries: 2,               // rate limits, 5xx and network faults
+  minRequestIntervalMs: 0,     // pace requests; see below
   baseUrl: '…',                // or ELVANTO_BASE_URL
   fetch: myFetch,              // injectable, for tests
   userAgent: 'my-app/1.0',
 })
 ```
+
+### Rate limits
+
+Elvanto documents none, so this library reacts to a `429` (honouring `Retry-After`)
+rather than predicting one. `minRequestIntervalMs` lets you avoid provoking one:
+
+```ts
+createClient({ minRequestIntervalMs: 100 })   // at most ~10 requests/second
+```
+
+It's enforced in the transport, so it applies to concurrent callers too — a
+`Promise.all` of 100 `getInfo` calls is spaced out rather than arriving at once.
+Pagination is already sequential, so this matters most when you fan out yourself.
 
 ### Validation
 
@@ -169,6 +183,14 @@ All extend `ElvantoError`:
 
 `isNotFound` covers both "that ID doesn't exist" and "nothing matched your
 filters", because Elvanto uses 404 for both.
+
+> **Errors can carry member data.** `ElvantoApiError.body` and
+> `ElvantoResponseValidationError.data` hold the raw response, because a schema
+> mismatch can't be diagnosed without it. If you ship errors to a log aggregator
+> or crash reporter, send `error.message` rather than the whole object, or strip
+> those two fields — `message` alone never contains a field value, since
+> mismatches are reported by path. Debug logging never includes response records;
+> an error object is the one place they can escape.
 
 ## Types
 

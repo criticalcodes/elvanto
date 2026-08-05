@@ -14,36 +14,48 @@ import {
  * populated form is unknown and they are typed loosely.
  */
 
-/** A step as summarised inside `peopleFlows/getAll`, where admins are bare IDs. */
-export const peopleFlowStepSummarySchema: z.ZodType<PeopleFlowStepSummary> = z.lazy(() =>
-  z.looseObject({
-    id: id,
-    name: z.string().optional(),
-    status: z.unknown().optional(),
-    entry_point: z.unknown().optional(),
-    admins: z.array(z.unknown()).optional(),
-    steps: z.array(peopleFlowStepSummarySchema).optional(),
-  }),
-)
+/**
+ * The non-recursive half of a step summary.
+ *
+ * Split out so the exported type can be *inferred* from it rather than written by
+ * hand. A recursive schema has to be annotated with its own output type, and that
+ * annotation only checks the schema is assignable to the type — a hand-written
+ * type that is wider than the schema passes silently. That bit once already:
+ * `notifications` became a boolean in the schema while the type still said
+ * `unknown`, and nothing caught it. Only the self-referential field is manual now.
+ */
+const peopleFlowStepSummaryBase = z.looseObject({
+  id: id,
+  name: z.string().optional(),
+  /** Only ever observed as `""`, so the populated form is unknown. */
+  status: z.string().optional(),
+  entry_point: z.string().optional(),
+  /** Bare person IDs here, unlike the objects on the detailed step schema. */
+  admins: z.array(id).optional(),
+})
 
-export interface PeopleFlowStepSummary {
-  id: string
-  name?: string | undefined
-  status?: unknown
-  entry_point?: unknown
-  admins?: unknown[] | undefined
+export type PeopleFlowStepSummary = z.output<typeof peopleFlowStepSummaryBase> & {
   steps?: PeopleFlowStepSummary[] | undefined
-  [key: string]: unknown
 }
+
+/** A step as summarised inside `peopleFlows/getAll`, where admins are bare IDs. */
+export const peopleFlowStepSummarySchema: z.ZodType<PeopleFlowStepSummary> =
+  peopleFlowStepSummaryBase.extend({
+    steps: z.lazy(() => z.array(peopleFlowStepSummarySchema)).optional(),
+  })
 
 /** A People Flow: an ordered set of steps people are moved through. */
 export const peopleFlowSchema = z.looseObject({
   id: id,
   name: z.string().optional(),
-  status: z.unknown().optional(),
-  access: z.unknown().optional(),
+  /** Only ever observed as `""`, so the populated form is unknown. */
+  status: z.string().optional(),
+  access: z.string().optional(),
   steps: z.array(peopleFlowStepSummarySchema).optional(),
-  admins: z.array(z.unknown()).optional(),
+  /** Bare person IDs. */
+  admins: z.array(id).optional(),
+  // Observed empty, so the member type is still unknown — unlike the person and
+  // group equivalents, which a live sweep confirmed as {id, name}.
   locations: z.array(z.unknown()).optional(),
   demographics: z.array(z.unknown()).optional(),
 })
@@ -63,61 +75,54 @@ export type PeopleFlowStepAdmin = z.output<typeof peopleFlowStepAdminSchema>
  * must tolerate an empty string rather than expecting an object.
  */
 export const stepDueSchema = z.looseObject({
-  type: z.unknown().optional(),
+  /** e.g. `"days"`. `""` when the step has no due rule. */
+  type: z.string().optional(),
   days: numericOptional,
   dayweek: z.unknown().optional(),
   daycount: numericOptional,
   date: dateString.optional(),
 })
 
+export type StepDue = z.output<typeof stepDueSchema>
+
+/**
+ * The non-recursive half of a step. See `peopleFlowStepSummaryBase` for why the
+ * type is inferred from this rather than written by hand.
+ */
+const peopleFlowStepBase = z.looseObject({
+  id: id,
+  name: z.string().optional(),
+  priority: numericOptional,
+  /** Only ever observed as `""`, so the populated form is unknown. */
+  status: z.string().optional(),
+  description: z.string().optional(),
+  instructions: z.string().optional(),
+  /**
+   * Documented as `"y"`, and a live account returns a single character, so it is
+   * treated as a flag. This is the one boolean extrapolated from a single observed
+   * value: an unrecognised third state fails loudly rather than being guessed at.
+   */
+  notifications: flag.optional(),
+  entry_point: z.string().optional(),
+  /** Only returned by `peopleFlows/steps/getAll`. */
+  hide_pending: numericOptional,
+  step_due: optionalReference(stepDueSchema),
+  /** Objects here, unlike the bare ID strings on the summary schema. */
+  admins: z.array(peopleFlowStepAdminSchema).optional(),
+})
+
+export type PeopleFlowStep = z.output<typeof peopleFlowStepBase> & {
+  steps?: PeopleFlowStep[] | undefined
+}
+
 /**
  * A step in full detail, including the instructions and description that
  * `peopleFlows/getAll` omits.
- *
- * Note `admins` here is a list of objects, whereas the same key on the flow
- * summary is a list of ID strings.
  */
-export const peopleFlowStepSchema: z.ZodType<PeopleFlowStep> = z.lazy(() =>
-  z.looseObject({
-    id: id,
-    name: z.string().optional(),
-    priority: numericOptional,
-    status: z.unknown().optional(),
-    description: z.string().optional(),
-    instructions: z.string().optional(),
-    /**
-     * Documented as `"y"`, and a live account returns a single character, so it
-     * is treated as a flag. This is the one boolean extrapolated from a single
-     * observed value: an unrecognised third state would fail loudly rather than
-     * being guessed at.
-     */
-    notifications: flag.optional(),
-    entry_point: z.unknown().optional(),
-    /** Only returned by `peopleFlows/steps/getAll`. */
-    hide_pending: numericOptional,
-    step_due: optionalReference(stepDueSchema),
-    admins: z.array(peopleFlowStepAdminSchema).optional(),
-    steps: z.array(peopleFlowStepSchema).optional(),
-  }),
-)
-
-export type StepDue = z.output<typeof stepDueSchema>
-
-export interface PeopleFlowStep {
-  id: string
-  name?: string | undefined
-  priority?: number | undefined
-  status?: unknown
-  description?: string | undefined
-  instructions?: string | undefined
-  notifications?: boolean | undefined
-  entry_point?: unknown
-  hide_pending?: number | undefined
-  step_due?: StepDue | undefined
-  admins?: PeopleFlowStepAdmin[] | undefined
-  steps?: PeopleFlowStep[] | undefined
-  [key: string]: unknown
-}
+export const peopleFlowStepSchema: z.ZodType<PeopleFlowStep> =
+  peopleFlowStepBase.extend({
+    steps: z.lazy(() => z.array(peopleFlowStepSchema)).optional(),
+  })
 
 /**
  * A person sitting in a People Flow step.

@@ -471,6 +471,86 @@ describe('retries', () => {
   })
 })
 
+describe('request pacing', () => {
+  /** Records when each request started. */
+  function pacedClient(minRequestIntervalMs: number) {
+    const startedAt: number[] = []
+    const client = new ElvantoClient({
+      auth: { apiKey: 'k' },
+      maxRetries: 0,
+      minRequestIntervalMs,
+      fetch: async () => {
+        startedAt.push(Date.now())
+        return new Response(JSON.stringify(fixtures.peopleGetAll), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+    return { client, startedAt }
+  }
+
+  const gaps = (times: number[]) =>
+    times.slice(1).map((time, index) => time - times[index]!)
+
+  test('is off by default', async () => {
+    const { client, startedAt } = pacedClient(0)
+    await Promise.all([client.people.getAll(), client.people.getAll(), client.people.getAll()])
+    expect(startedAt).toHaveLength(3)
+    // No pacing: all three start effectively together.
+    expect(Math.max(...gaps(startedAt))).toBeLessThan(40)
+  })
+
+  test('spaces out concurrent callers, not just sequential ones', async () => {
+    // The case a caller cannot fix themselves: a Promise.all fan-out would
+    // otherwise arrive at Elvanto all at once.
+    const { client, startedAt } = pacedClient(60)
+    await Promise.all([
+      client.people.getAll(),
+      client.people.getAll(),
+      client.people.getAll(),
+    ])
+
+    expect(startedAt).toHaveLength(3)
+    for (const gap of gaps(startedAt)) {
+      expect(gap).toBeGreaterThanOrEqual(50)
+    }
+  })
+
+  test('paces sequential calls too', async () => {
+    const { client, startedAt } = pacedClient(60)
+    await client.people.getAll()
+    await client.people.getAll()
+    expect(gaps(startedAt)[0]).toBeGreaterThanOrEqual(50)
+  })
+
+  test('does not stall later requests when one fails', async () => {
+    // The gate must be released on the error path, or a single failure would
+    // deadlock every subsequent request.
+    let attempt = 0
+    const client = new ElvantoClient({
+      auth: { apiKey: 'k' },
+      maxRetries: 0,
+      minRequestIntervalMs: 20,
+      fetch: async () => {
+        attempt++
+        if (attempt === 1) throw new TypeError('fetch failed')
+        return new Response(JSON.stringify(fixtures.peopleGetAll), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await expect(client.people.getAll()).rejects.toThrow()
+    await expect(client.people.getAll()).resolves.toMatchObject({ total: 5 })
+  })
+
+  test('treats a negative interval as off rather than as a rewind', async () => {
+    const { client, startedAt } = pacedClient(-100)
+    await Promise.all([client.people.getAll(), client.people.getAll()])
+    expect(startedAt).toHaveLength(2)
+  })
+})
+
 describe('parseValidationMode', () => {
   test('accepts the documented spellings', () => {
     expect(parseValidationMode('throw')).toBe('throw')

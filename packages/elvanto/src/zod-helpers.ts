@@ -1,6 +1,18 @@
 import { z } from 'zod'
 
 /**
+ * Schema helpers for Elvanto's XML-shaped JSON.
+ *
+ * Several helpers end in `as unknown as z.ZodType<Out, unknown>`. That is not
+ * decoration: `z.preprocess` widens its input to `unknown`, and the cast restores
+ * a signature callers can compose with. Each one is a promise that the runtime
+ * transform really does produce the declared output type — the compiler cannot
+ * check it. If you change a preprocess body, change its declared type with it, and
+ * lean on `test/zod-helpers.test.ts`, which exercises every degenerate input
+ * precisely because these casts cannot be trusted on inspection alone.
+ */
+
+/**
  * Elvanto's JSON is a mechanical translation of an XML document, so collections
  * arrive double-wrapped under a singular key:
  *

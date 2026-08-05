@@ -3,6 +3,7 @@ import {
   dateString,
   flag,
   id,
+  numericOptional,
   reference,
   wrapped,
 } from '../zod-helpers.js'
@@ -40,7 +41,8 @@ export type SongFile = z.output<typeof songFileSchema>
  */
 export const songSchema = z.looseObject({
   id: id,
-  status: z.unknown().optional(),
+  /** Elvanto's own numeric state, not a boolean. */
+  status: numericOptional,
   date_added: dateString.optional(),
   date_modified: dateString.optional(),
   title: z.string().optional(),

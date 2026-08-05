@@ -32,8 +32,11 @@ export const calendarEventSchema = z.looseObject({
   picture: z.string().optional(),
   /** The calendar this event belongs to. */
   calendar_id: id.optional(),
-  /** Elvanto's repeat interval for a recurring event. */
-  interval: z.unknown().optional(),
+  /**
+   * Elvanto's repeat interval for a recurring event. Observed as `""` on
+   * non-recurring events; the populated form has not been seen.
+   */
+  interval: z.string().optional(),
   url: z.string().optional(),
 
   // Returned only when named in `fields`.

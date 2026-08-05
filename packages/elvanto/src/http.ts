@@ -22,12 +22,22 @@ export const DEFAULT_MAX_RETRIES = 2
  *
  * - `throw` (default): raise {@link ElvantoResponseValidationError}. Surfaces
  *   API drift immediately; recommended for tests and CI.
- * - `warn`: hand back the unvalidated payload and report the mismatch through
- *   `onWarning`. Elvanto publishes no machine-readable spec, so this is the
- *   pragmatic choice for production code that must not break on a new field.
+ * - `warn`: hand back the payload and report the mismatch through `onWarning`.
+ *   Elvanto publishes no machine-readable spec, so this is the pragmatic choice
+ *   for production code that must not break on a new field. Records that do
+ *   validate keep their normalization; only the offending record is returned raw.
  * - `off`: skip response validation entirely.
  *
  * Request parameters are always validated, regardless of this setting.
+ *
+ * ## Types under `warn` and `off`
+ *
+ * The static types describe the *validated* shape, so under these two modes they
+ * are a claim rather than a guarantee: a result typed `Person[]` may contain an
+ * item that failed validation and came back unchanged. That is the point of the
+ * modes — keep working when a schema is imperfect — but treat a field as
+ * possibly-absent if you have turned strictness off, and use `throw` in tests so
+ * the claim is actually checked somewhere.
  */
 export type ValidationMode = 'throw' | 'warn' | 'off'
 
@@ -79,6 +89,19 @@ export interface ElvantoClientOptions {
    * Only ever applied to read-only endpoints in this version.
    */
   maxRetries?: number
+  /**
+   * Minimum gap between the start of one request and the next, in milliseconds.
+   * Default 0 — off.
+   *
+   * Elvanto documents no rate limits, so this library reacts to a 429 rather than
+   * predicting one. Set this to avoid provoking one in the first place: paging
+   * through a large account, or fanning out `getInfo` calls, otherwise issues
+   * requests as fast as they complete.
+   *
+   * Enforced in the transport, so it applies to concurrent callers too — a
+   * `Promise.all` of 100 calls is spaced out rather than arriving at once.
+   */
+  minRequestIntervalMs?: number
   /** Response validation strictness. Default `"throw"`. */
   validate?: ValidationMode
   /** Called when `validate: "warn"` swallows a schema mismatch. */
@@ -116,6 +139,7 @@ interface ResolvedOptions {
   fetchImpl: typeof globalThis.fetch
   timeoutMs: number
   maxRetries: number
+  minRequestIntervalMs: number
   validate: ValidationMode
   onWarning: ((warning: ElvantoValidationWarning) => void) | undefined
   userAgent: string
@@ -200,6 +224,17 @@ export class Transport {
   private readonly options: ResolvedOptions
   readonly logging: ResolvedLogging
 
+  /**
+   * Serialises slot acquisition for request pacing.
+   *
+   * Each caller awaits the previous one before checking the clock, so concurrent
+   * callers queue instead of all passing the same check at once. The gate is
+   * released as soon as a slot is taken, not when the request finishes — the aim
+   * is to space request *starts*, not to serialise the requests themselves.
+   */
+  private pacingGate: Promise<void> = Promise.resolve()
+  private lastRequestStartedAt = 0
+
   constructor(options: ElvantoClientOptions = {}) {
     this.logging = resolveLogging(options.debug, options.logger)
     this.auth = resolveAuth(options.auth)
@@ -220,6 +255,7 @@ export class Transport {
       fetchImpl,
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
+      minRequestIntervalMs: Math.max(options.minRequestIntervalMs ?? 0, 0),
       validate: options.validate ?? 'throw',
       onWarning: options.onWarning,
       userAgent: options.userAgent
@@ -239,6 +275,27 @@ export class Transport {
   /** True when authenticating with an API key rather than OAuth. */
   get usesApiKey(): boolean {
     return 'apiKey' in this.auth
+  }
+
+  /** Waits until the configured minimum gap since the last request has elapsed. */
+  private async takePacingSlot(): Promise<void> {
+    const interval = this.options.minRequestIntervalMs
+    if (interval <= 0) return
+
+    const previous = this.pacingGate
+    let release!: () => void
+    this.pacingGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      await previous
+      const wait = this.lastRequestStartedAt + interval - Date.now()
+      if (wait > 0) await delay(wait)
+      this.lastRequestStartedAt = Date.now()
+    } finally {
+      // Always release, or one failure would stall every later request.
+      release()
+    }
   }
 
   /**
@@ -291,6 +348,8 @@ export class Transport {
         }
         await delay(waitMs)
       }
+
+      await this.takePacingSlot()
 
       const startedAt = Date.now()
       const { signal, dispose } = withTimeout(

@@ -1,4 +1,22 @@
 /**
+ * Errors thrown by this library.
+ *
+ * ## A note on error payloads and member data
+ *
+ * `ElvantoApiError.body` and `ElvantoResponseValidationError.data` deliberately
+ * carry the raw response. There is no way to diagnose a schema mismatch without
+ * seeing what actually arrived, so this is a considered trade rather than an
+ * oversight — but it means those two fields can contain member records or giving
+ * data.
+ *
+ * Diagnostic logging is careful never to include response records; an error object
+ * is the one place they can escape. So if you send errors to a log aggregator or
+ * crash reporter, serialise `error.message` rather than the whole object, or strip
+ * `body` and `data` first. `message` alone never contains a field value — schema
+ * mismatches are reported by path.
+ */
+
+/**
  * Base class for every error this library throws. Catch this to catch them all.
  */
 export class ElvantoError extends Error {

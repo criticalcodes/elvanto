@@ -100,6 +100,20 @@ Every surface exposes the opt-out: `--validate warn` on the CLI,
 Request parameters are always validated strictly, regardless of this setting —
 those are well documented, so a bad parameter is your bug, not Elvanto's.
 
+Two things worth knowing:
+
+- **Under `warn`, records that validate keep their normalization** and only the
+  offending record comes back raw. One unexpected field on one person doesn't cost
+  the rest of the page its booleans.
+- **Under `warn` and `off`, the static types are a claim rather than a
+  guarantee** — a result typed `Person[]` may contain an unvalidated item. That's
+  the trade those modes exist to make; run `throw` in tests so the claim is
+  checked somewhere.
+
+Errors can carry member data by design: `ElvantoApiError.body` and
+`ElvantoResponseValidationError.data` hold the raw response, because a mismatch
+can't be diagnosed without it. Log `error.message`, not the whole object.
+
 ## Debug logging
 
 Off by default. `debug: true` (or `ELVANTO_DEBUG=1`) logs requests, HTTP status,

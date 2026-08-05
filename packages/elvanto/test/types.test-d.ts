@@ -4,10 +4,20 @@
  * shows up as a tsc error rather than a test failure.
  */
 import { expectTypeOf } from 'vitest'
+import type { z } from 'zod'
 import type { ElvantoClient, ResultOf } from '../src/client.js'
 import type { Page } from '../src/normalize.js'
 import type { Person } from '../src/schemas/people.js'
 import type { Transaction } from '../src/schemas/financial.js'
+import type { Department } from '../src/schemas/common.js'
+import type { Service } from '../src/schemas/services.js'
+import type { Song } from '../src/schemas/songs.js'
+import {
+  peopleFlowStepSchema,
+  peopleFlowStepSummarySchema,
+  type PeopleFlowStep,
+  type PeopleFlowStepSummary,
+} from '../src/schemas/peopleFlows.js'
 import type { Reference } from '../src/zod-helpers.js'
 
 declare const client: ElvantoClient
@@ -59,6 +69,35 @@ export function paginate_yields_records_and_rejects_non_paginated_endpoints() {
   expectTypeOf(client.fetchAll('people.getAll')).resolves.toEqualTypeOf<Person[]>()
   // @ts-expect-error people.getInfo returns a single record, not a page.
   client.paginate('people.getInfo')
+}
+
+/**
+ * The recursive People Flow types are derived from their schemas rather than
+ * written by hand, because a hand-written type wider than its schema passes the
+ * `z.ZodType<T>` annotation silently — which is how `notifications` once claimed
+ * `unknown` while the schema produced a boolean. These assertions fail if that
+ * derivation is ever replaced with a manual type again.
+ */
+export function recursive_types_follow_their_schemas() {
+  expectTypeOf<PeopleFlowStep['notifications']>().toEqualTypeOf<boolean | undefined>()
+  expectTypeOf<PeopleFlowStep['hide_pending']>().toEqualTypeOf<number | undefined>()
+  expectTypeOf<PeopleFlowStep['steps']>().toEqualTypeOf<PeopleFlowStep[] | undefined>()
+  // Admins differ between the two shapes: objects here, bare IDs on the summary.
+  expectTypeOf<PeopleFlowStep['admins']>().not.toEqualTypeOf<string[] | undefined>()
+  expectTypeOf<PeopleFlowStepSummary['admins']>().toEqualTypeOf<string[] | undefined>()
+
+  // The schema's output and the exported type are the same thing, not two.
+  expectTypeOf<z.output<typeof peopleFlowStepSchema>>().toEqualTypeOf<PeopleFlowStep>()
+  expectTypeOf<z.output<typeof peopleFlowStepSummarySchema>>().toEqualTypeOf<PeopleFlowStepSummary>()
+}
+
+/** Fields narrowed off `unknown` once live data settled them. */
+export function narrowed_fields_stay_narrow() {
+  expectTypeOf<Service['status']>().toEqualTypeOf<number | undefined>()
+  expectTypeOf<Song['status']>().toEqualTypeOf<number | undefined>()
+  expectTypeOf<Department['sub_departments']>().not.toBeUnknown()
+  // school_grade is documented as a name but observed as an object.
+  expectTypeOf<Person['school_grade']>().not.toBeUnknown()
 }
 
 export function required_parameters_are_enforced() {
