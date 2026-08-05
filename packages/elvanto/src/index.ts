@@ -109,10 +109,14 @@ export { parseElvantoDate, type Reference } from './zod-helpers.js'
 // Resource schemas and their inferred types.
 export {
   customFieldSchema,
+  familyMemberSchema,
+  familySchema,
   peopleCategorySchema,
   personReferenceSchema,
   personSchema,
   type CustomField,
+  type Family,
+  type FamilyMember,
   type PeopleCategory,
   type Person,
   type PersonReference,

@@ -3,9 +3,36 @@ import {
   dateString,
   flag,
   id,
+  optionalReference,
   reference,
   wrapped,
 } from '../zod-helpers.js'
+
+/** A member of someone's family, as returned by the `family` field. */
+export const familyMemberSchema = z.looseObject({
+  id: id,
+  firstname: z.string().optional(),
+  preferred_name: z.string().optional(),
+  middle_name: z.string().optional(),
+  lastname: z.string().optional(),
+  relationship: z.string().optional(),
+})
+
+export type FamilyMember = z.output<typeof familyMemberSchema>
+
+/**
+ * A person's family.
+ *
+ * Not a collection of people, despite the field name — Elvanto wraps the members
+ * in an object alongside the family's own ID. Confirmed against a live account;
+ * the documentation shows no example.
+ */
+export const familySchema = z.looseObject({
+  family_id: id.optional(),
+  family_member: wrapped('family_member', familyMemberSchema).optional(),
+})
+
+export type Family = z.output<typeof familySchema>
 
 /**
  * A person.
@@ -48,7 +75,12 @@ export const personSchema = z.looseObject({
   gender: z.string().optional(),
   birthday: dateString.optional(),
   anniversary: dateString.optional(),
-  school_grade: z.string().optional(),
+  /**
+   * The documentation calls this a name, but a live account returns an
+   * `{id, name}` object when it is set and `""` when it is not. Both forms are
+   * accepted rather than betting on one.
+   */
+  school_grade: optionalReference(z.union([z.string(), reference])),
   marital_status: z.string().optional(),
   development_child: flag.optional(),
   special_needs_child: flag.optional(),
@@ -70,17 +102,15 @@ export const personSchema = z.looseObject({
   home_country: z.string().optional(),
 
   locations: wrapped('location', reference).optional(),
-  // The singular keys and item shapes below are inferred: the documentation
-  // names these fields but shows no populated example. `departments` and
-  // `access_permissions` are written as plain strings ("Worship Team||Band||
-  // Guitar"), so they may read back as bare strings rather than `{id, name}` —
-  // which will surface as a validation error rather than silently empty data.
-  // Verify with `pnpm smoke`.
+  // These four returned empty on the account swept so far, which is consistent
+  // with both "this person has none" and a wrong singular key — so the key and
+  // item shape are still inferred. A populated record will settle it, and a wrong
+  // guess fails loudly rather than yielding silent empty data.
   departments: wrapped('department', reference).optional(),
   demographics: wrapped('demographic', reference).optional(),
   service_types: wrapped('service_type', reference).optional(),
   access_permissions: wrapped('access_permission', reference).optional(),
-  family: wrapped('person', reference).optional(),
+  family: optionalReference(familySchema),
   reports_to: z.string().optional(),
 })
 

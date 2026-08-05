@@ -17,9 +17,7 @@
  *   ELVANTO_API_KEY=... pnpm smoke
  *   ELVANTO_API_KEY=... pnpm smoke --financial --json report.json
  */
-import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
 import {
   ElvantoApiError,
   ElvantoClient,
@@ -30,32 +28,14 @@ import {
   type EndpointId,
 } from '../packages/elvanto/src/index.js'
 
-/**
- * Load the repository's `.env` before anything reads credentials.
- *
- * Must run before the client is constructed below, since that is when the
- * environment is consulted. Existing environment variables win, so an explicit
- * `ELVANTO_API_KEY=… pnpm smoke` still overrides the file.
- */
-function loadDotEnv(): void {
-  const path = fileURLToPath(new URL('../.env', import.meta.url))
-  if (!existsSync(path)) return
-
-  if (typeof process.loadEnvFile !== 'function') {
-    process.stderr.write(
-      'Found .env but this Node version cannot read it (needs 20.12+). ' +
-        'Pass the variables directly instead.\n',
-    )
-    return
-  }
-  process.loadEnvFile(path)
-}
-
-loadDotEnv()
-
 interface EndpointReport {
   id: string
-  status: 'ok' | 'skipped' | 'api-error' | 'failed'
+  /**
+   * `empty` is separated from `api-error` because Elvanto answers "no records
+   * match your criteria" with a 404 — an account with no songs is not a problem
+   * with the endpoint, and reporting it as an error buries the real ones.
+   */
+  status: 'ok' | 'empty' | 'skipped' | 'api-error' | 'failed'
   detail?: string
   recordCount?: number
   /** Keys Elvanto returned that our schema does not declare. */
@@ -73,6 +53,19 @@ const jsonPathIndex = process.argv.indexOf('--json')
 const jsonPath = jsonPathIndex > -1 ? process.argv[jsonPathIndex + 1] : undefined
 
 const warnings: ElvantoValidationWarning[] = []
+
+if (!process.env['ELVANTO_API_KEY'] && !process.env['ELVANTO_ACCESS_TOKEN']) {
+  // Caught here rather than letting the client throw, so the failure reads as
+  // usage guidance instead of a stack trace.
+  process.stderr.write(
+    'No credentials. This script needs a real Elvanto account:\n\n' +
+      '  ELVANTO_API_KEY=$(op read "op://Private/Elvanto/api key") pnpm smoke\n' +
+      '  ELVANTO_API_KEY=your-key pnpm smoke\n\n' +
+      'Find the key in Elvanto under Settings > Account Settings > Secret API Key.\n' +
+      'Nothing here reads a .env file — the key is passed per run on purpose.\n',
+  )
+  process.exit(2)
+}
 
 const client = new ElvantoClient({
   // warn, not throw: one unexpected shape must not stop the sweep.
@@ -336,6 +329,17 @@ async function run(): Promise<EndpointReport[]> {
         .join(', ')
       process.stderr.write(`  ok    ${id}${flags ? `  (${flags})` : ''}\n`)
     } catch (error) {
+      if (error instanceof ElvantoApiError && error.isNotFound) {
+        reports.push({
+          id,
+          status: 'empty',
+          recordCount: 0,
+          detail: error.message,
+        })
+        process.stderr.write(`  empty ${id}  (nothing in this account)\n`)
+        continue
+      }
+
       const isApiError = error instanceof ElvantoApiError
       reports.push({
         id,
@@ -360,8 +364,9 @@ const counts = reports.reduce<Record<string, number>>((acc, report) => {
 }, {})
 
 process.stderr.write(
-  `\n${counts['ok'] ?? 0} ok, ${counts['skipped'] ?? 0} skipped, ` +
-    `${counts['api-error'] ?? 0} API errors, ${counts['failed'] ?? 0} failed\n`,
+  `\n${counts['ok'] ?? 0} ok, ${counts['empty'] ?? 0} empty, ` +
+    `${counts['skipped'] ?? 0} skipped, ${counts['api-error'] ?? 0} API errors, ` +
+    `${counts['failed'] ?? 0} failed\n`,
 )
 
 const undocumented = reports.filter((r) => r.undocumentedFields?.length)

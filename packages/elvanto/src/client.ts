@@ -228,7 +228,20 @@ export class ElvantoClient {
       if (result.success) return result.data
 
       this.report(id, mode, toIssues(result.error, shape.collectionKey), raw)
-      return structural.parse(raw)
+
+      // Salvage per record rather than abandoning the whole page. One unexpected
+      // field on one record would otherwise cost every other record its
+      // normalization — booleans staying as 1/0, quoted numbers staying strings —
+      // which is a surprising penalty for the mode whose job is to keep working
+      // when a schema is imperfect.
+      const page = structural.parse(raw) as Page<unknown>
+      return {
+        ...page,
+        items: page.items.map((item) => {
+          const parsed = shape.item.safeParse(item)
+          return parsed.success ? parsed.data : item
+        }),
+      }
     }
 
     const raw = envelope[shape.key]

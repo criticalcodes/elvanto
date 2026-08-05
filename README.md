@@ -132,14 +132,17 @@ Because the schemas come from documentation examples, the honest way to check
 them is to call the API. The smoke test sweeps every read-only endpoint, chains
 IDs from one call into the next, and reports what it finds:
 
-Credentials come from a `.env` in the repository root (copy `.env.example`), or
-from the environment, which takes precedence:
+Pass the key per invocation. Nothing here reads a `.env`, deliberately: an
+Elvanto API key grants read access to every member record and every giving
+record in the account, and this script is run occasionally — not often enough to
+justify leaving that on disk in plaintext. Pulling it from a secret manager keeps
+it out of both the filesystem and your shell history:
 
 ```console
-$ cp .env.example .env && $EDITOR .env   # then just:
-$ pnpm smoke
+$ ELVANTO_API_KEY=$(op read "op://Private/Elvanto/api key") pnpm smoke
+$ ELVANTO_API_KEY=$(security find-generic-password -s elvanto -w) pnpm smoke
 
-$ ELVANTO_API_KEY=your-key pnpm smoke    # or pass it directly
+$ ELVANTO_API_KEY=your-key pnpm smoke    # fine too; lands in shell history
   ok    people.getAll  (+1 undocumented)
   ok    people.search
   skip  people.currentUser

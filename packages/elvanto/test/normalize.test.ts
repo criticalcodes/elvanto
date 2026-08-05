@@ -170,6 +170,103 @@ describe('wrapped collections', () => {
   })
 })
 
+describe('shapes confirmed against a live account', () => {
+  test('accepts school_grade as an object, a string, or empty', async () => {
+    // Documented as a name; a real account returns {id, name} when set.
+    const { client } = testClient([{ body: fixtures.peopleWithSchoolGrade }])
+    const result = await client.people.getAll({ fields: ['school_grade'] })
+
+    expect(result.items[0]!.school_grade).toBeUndefined()
+    expect(result.items[1]!.school_grade).toEqual({ id: 'g4', name: 'Year 4' })
+    expect(result.items[2]!.school_grade).toBe('Year 5')
+  })
+
+  test('reads family as an object holding its members', async () => {
+    // Not a collection of people, despite the field name.
+    const { client } = testClient([{ body: fixtures.peopleGetInfo }])
+    const person = await client.people.getInfo({ id: 'x', fields: ['family'] })
+
+    expect(person.family?.family_id).toBe('10')
+    expect(person.family?.family_member).toHaveLength(2)
+    expect(person.family?.family_member?.[0]?.relationship).toBe('Spouse')
+  })
+
+  test('reads a People Flow step due rule, including its days', async () => {
+    const { client } = testClient([
+      {
+        body: {
+          status: 'ok',
+          people_flow_steps: {
+            people_flow_step: [
+              {
+                id: 'st1',
+                name: 'Welcome email',
+                priority: '1',
+                hide_pending: 0,
+                step_due: { type: 'days', days: 3 },
+                admins: [],
+                steps: [],
+              },
+            ],
+          },
+        },
+      },
+    ])
+    const result = await client.peopleFlows.steps.getAll({ flow_id: 'f1' })
+    expect(result.items[0]!.step_due).toEqual({ type: 'days', days: 3 })
+    expect(result.items[0]!.hide_pending).toBe(0)
+  })
+
+  test('accepts an empty step due rule, which Elvanto sends as ""', async () => {
+    const { client } = testClient([
+      {
+        body: {
+          status: 'ok',
+          people_flow_steps: {
+            people_flow_step: [{ id: 'st1', name: 'Step', step_due: '' }],
+          },
+        },
+      },
+    ])
+    const result = await client.peopleFlows.steps.getAll({ flow_id: 'f1' })
+    expect(result.items[0]!.step_due).toBeUndefined()
+  })
+
+  test('reads the calendar event fields a live account returns', async () => {
+    const { client } = testClient([
+      {
+        body: {
+          status: 'ok',
+          events: {
+            event: [
+              {
+                id: 'e1',
+                name: 'Picnic',
+                where: 'The Park',
+                start_date: '2026-06-03 04:00:00',
+                end_date: '2026-06-03 05:00:00',
+                all_day: 1,
+                color: '',
+                picture: 'https://path.to/image.png',
+                interval: '',
+                url: 'https://church.elvanto.net/event/abc',
+              },
+            ],
+          },
+        },
+      },
+    ])
+    const event = (await client.calendar.events.getAll({
+      start: '2026-06-01',
+      end: '2026-06-30',
+    })).items[0]!
+
+    expect(event.picture).toBe('https://path.to/image.png')
+    expect(event.url).toBe('https://church.elvanto.net/event/abc')
+    expect(event.all_day).toBe(true)
+  })
+})
+
 describe('value normalization', () => {
   test('turns documented 1/0 flags into booleans', async () => {
     const { client } = testClient([{ body: fixtures.peopleGetInfo }])
@@ -294,6 +391,42 @@ describe('validation modes', () => {
     expect(result.items).toHaveLength(1)
     expect(onWarning).toHaveBeenCalledTimes(1)
     expect(onWarning.mock.calls[0]![0].endpoint).toBe('people.getAll')
+  })
+
+  test('warn mode still normalizes the records that are fine', async () => {
+    // One bad record must not cost the others their normalization. Observed for
+    // real: a single unexpected field left a whole page with 1/0 instead of
+    // booleans.
+    const onWarning = vi.fn()
+    const { client } = testClient(
+      [
+        {
+          body: {
+            status: 'ok',
+            people: {
+              page: 1,
+              per_page: 2,
+              on_this_page: 2,
+              total: 2,
+              person: [
+                { id: 'good', volunteer: 1, locations: { location: [{ id: 'l1' }] } },
+                { firstname: 'no id at all', volunteer: 1 },
+              ],
+            },
+          },
+        },
+      ],
+      { validate: 'warn', onWarning },
+    )
+
+    const result = await client.people.getAll()
+    expect(onWarning).toHaveBeenCalledTimes(1)
+
+    // The valid record keeps its booleans and flattened collections.
+    expect(result.items[0]!.volunteer).toBe(true)
+    expect(result.items[0]!.locations).toEqual([{ id: 'l1' }])
+    // The invalid one is handed back raw rather than dropped.
+    expect((result.items[1] as { firstname?: string }).firstname).toBe('no id at all')
   })
 
   test('off mode skips field validation but still normalizes structure', async () => {

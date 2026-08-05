@@ -70,9 +70,44 @@ export const peopleGetInfo = {
           { id: '9f3aec97-3d61-471d-ab50-5f28070d970d', name: 'North Campus' },
         ],
       },
+      // Observed on a live account: `family` is an object holding the family's own
+      // ID plus its members, not a collection of people as the field name implies.
+      family: {
+        family_id: '10',
+        family_member: [
+          { id: 'aaa', firstname: 'Jane', lastname: 'Smith', relationship: 'Spouse' },
+          { id: 'bbb', firstname: 'Kim', lastname: 'Smith', relationship: 'Child' },
+        ],
+      },
+      reports_to: '',
       'custom_77493627-aaba-426e-48dc-b0b0d8d24c99': 'Gardner',
     },
   ],
+}
+
+/**
+ * Observed on a live account: `school_grade` is documented as a name but comes
+ * back as an `{id, name}` object when set, and `""` when not. The first record
+ * also carries the unset form, so both shapes appear in one page.
+ */
+export const peopleWithSchoolGrade = {
+  status: 'ok',
+  people: {
+    page: 1,
+    per_page: 3,
+    on_this_page: 3,
+    total: 3,
+    person: [
+      { id: 'p1', firstname: 'Ada', volunteer: 1, school_grade: '' },
+      {
+        id: 'p2',
+        firstname: 'Bo',
+        volunteer: 0,
+        school_grade: { id: 'g4', name: 'Year 4' },
+      },
+      { id: 'p3', firstname: 'Cy', volunteer: 1, school_grade: 'Year 5' },
+    ],
+  },
 }
 
 export const transactionGetInfo = {

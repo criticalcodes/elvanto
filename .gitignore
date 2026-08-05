@@ -1,9 +1,10 @@
 node_modules/
 dist/
 *.tsbuildinfo
+# Nothing in this repo reads a .env — credentials are passed per invocation. These
+# stay ignored anyway, so a stray one can never be committed by accident.
 .env
 .env.*
-!.env.example
 .DS_Store
 *.log
 .vitest/
