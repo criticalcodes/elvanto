@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   dateString,
+  flag,
   id,
   numericOptional,
   optionalReference,
@@ -84,7 +85,13 @@ export const peopleFlowStepSchema: z.ZodType<PeopleFlowStep> = z.lazy(() =>
     status: z.unknown().optional(),
     description: z.string().optional(),
     instructions: z.string().optional(),
-    notifications: z.unknown().optional(),
+    /**
+     * Documented as `"y"`, and a live account returns a single character, so it
+     * is treated as a flag. This is the one boolean extrapolated from a single
+     * observed value: an unrecognised third state would fail loudly rather than
+     * being guessed at.
+     */
+    notifications: flag.optional(),
     entry_point: z.unknown().optional(),
     /** Only returned by `peopleFlows/steps/getAll`. */
     hide_pending: numericOptional,

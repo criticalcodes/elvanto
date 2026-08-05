@@ -8,6 +8,14 @@ import {
   wrapped,
 } from '../zod-helpers.js'
 
+/**
+ * A relation Elvanto may return either as `{id, name}` or as a bare name string.
+ *
+ * Used where no read example is documented and the write form is a plain name, so
+ * either is plausible.
+ */
+const referenceOrName = z.union([reference, z.string()])
+
 /** A member of someone's family, as returned by the `family` field. */
 export const familyMemberSchema = z.looseObject({
   id: id,
@@ -102,14 +110,16 @@ export const personSchema = z.looseObject({
   home_country: z.string().optional(),
 
   locations: wrapped('location', reference).optional(),
-  // These four returned empty on the account swept so far, which is consistent
-  // with both "this person has none" and a wrong singular key — so the key and
-  // item shape are still inferred. A populated record will settle it, and a wrong
-  // guess fails loudly rather than yielding silent empty data.
-  departments: wrapped('department', reference).optional(),
-  demographics: wrapped('demographic', reference).optional(),
-  service_types: wrapped('service_type', reference).optional(),
-  access_permissions: wrapped('access_permission', reference).optional(),
+  // Provisionally tolerant. Elvanto publishes no read example for these four and
+  // writes them as bare name strings ("Worship Team||Band||Guitar"), so both that
+  // and the usual {id, name} are accepted — a hard failure on a documented-
+  // plausible shape would be worse than a slightly wider type. `pnpm smoke`
+  // against a record that has them will show which form is real, and this can
+  // then be narrowed.
+  departments: wrapped('department', referenceOrName).optional(),
+  demographics: wrapped('demographic', referenceOrName).optional(),
+  service_types: wrapped('service_type', referenceOrName).optional(),
+  access_permissions: wrapped('access_permission', referenceOrName).optional(),
   family: optionalReference(familySchema),
   reports_to: z.string().optional(),
 })

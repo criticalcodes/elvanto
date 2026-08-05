@@ -16,6 +16,11 @@
  * Usage:
  *   ELVANTO_API_KEY=... pnpm smoke
  *   ELVANTO_API_KEY=... pnpm smoke --financial --json report.json
+ *   ELVANTO_API_KEY=... pnpm smoke --person <id>   # force the detail record
+ *
+ * The detail endpoints are given whichever record populates the most inferred
+ * collections, rather than the first one returned — an empty collection cannot
+ * tell a correct wrapper key from a wrong one.
  */
 import { writeFile } from 'node:fs/promises'
 import {
@@ -51,6 +56,41 @@ const includeData = args.has('--include-data')
 const includeFinancial = args.has('--financial')
 const jsonPathIndex = process.argv.indexOf('--json')
 const jsonPath = jsonPathIndex > -1 ? process.argv[jsonPathIndex + 1] : undefined
+const personIndex = process.argv.indexOf('--person')
+const forcedPersonId = personIndex > -1 ? process.argv[personIndex + 1] : undefined
+
+/**
+ * Collections whose wrapper key and item shape are inferred rather than
+ * documented — Elvanto names the field but publishes no populated example.
+ *
+ * These are the whole reason the sweep prefers a rich record over the first one:
+ * an empty collection proves nothing, because a wrong key and a genuinely empty
+ * list look identical. A populated one settles it, since a wrong key fails
+ * validation rather than returning an empty array.
+ */
+const INFERRED_COLLECTIONS: Record<string, readonly string[]> = {
+  'people.getAll': [
+    'departments',
+    'demographics',
+    'service_types',
+    'access_permissions',
+    'locations',
+    'family',
+  ],
+  'people.getInfo': [
+    'departments',
+    'demographics',
+    'service_types',
+    'access_permissions',
+    'locations',
+    'family',
+  ],
+  'groups.getAll': ['categories', 'departments', 'demographics', 'locations'],
+  'groups.getInfo': ['categories', 'departments', 'demographics', 'locations'],
+}
+
+/** `endpoint.field` entries seen with at least one member, across the sweep. */
+const provenPopulated = new Set<string>()
 
 const warnings: ElvantoValidationWarning[] = []
 
@@ -86,9 +126,11 @@ function paramsFor(id: EndpointId): Record<string, unknown> | 'skip' {
 
   switch (id) {
     case 'people.getAll':
-      // Ask for the optional fields too — that is where the schema is least sure.
+      // A wide page, because the record that settles the inferred collections is
+      // whoever is in the most departments — usually an admin, rarely the first
+      // person alphabetically.
       return {
-        page_size: 10,
+        page_size: 100,
         fields: [
           'gender', 'birthday', 'anniversary', 'school_grade', 'marital_status',
           'locations', 'departments', 'demographics', 'service_types',
@@ -98,14 +140,24 @@ function paramsFor(id: EndpointId): Record<string, unknown> | 'skip' {
     case 'people.search':
       return { page_size: 10, search: { archived: 'no' } }
     case 'people.getInfo':
-      return requireId('personId', { fields: ['locations', 'family', 'reports_to'] })
+      return requireId('personId', {
+        fields: [
+          'locations', 'family', 'reports_to', 'departments', 'demographics',
+          'service_types', 'access_permissions', 'school_grade',
+        ],
+      })
     case 'people.currentUser':
       // API keys cannot use this endpoint; only meaningful under OAuth.
       return process.env['ELVANTO_ACCESS_TOKEN'] ? {} : 'skip'
     case 'groups.getAll':
-      return { page_size: 10, fields: ['people'] }
+      return {
+        page_size: 100,
+        fields: ['people', 'categories', 'departments', 'demographics', 'locations'],
+      }
     case 'groups.getInfo':
-      return requireId('groupId', { fields: ['people'] })
+      return requireId('groupId', {
+        fields: ['people', 'categories', 'departments', 'demographics', 'locations'],
+      })
     case 'services.getAll':
       return {
         page_size: 10,
@@ -160,10 +212,55 @@ function requireId(
   return { [paramName]: value, ...extra }
 }
 
+/**
+ * How many of an endpoint's inferred collections this record actually populates.
+ *
+ * Also records what was seen, so the run can report which keys are still
+ * unproven rather than leaving the reader to infer it from empty arrays.
+ */
+function scoreCoverage(id: EndpointId, record: Record<string, unknown>): number {
+  const fields = INFERRED_COLLECTIONS[id] ?? []
+  let score = 0
+  for (const field of fields) {
+    const value = record[field]
+    const populated = Array.isArray(value)
+      ? value.length > 0
+      : value != null && value !== '' && typeof value === 'object'
+    if (populated) {
+      score++
+      provenPopulated.add(`${id.split('.')[0]}.${field}`)
+    }
+  }
+  // An admin is the likeliest record to be attached to everything, so prefer one
+  // when nothing else distinguishes the candidates.
+  if (record['admin'] === true || record['admin'] === 1) score += 0.5
+  return score
+}
+
+/** Picks the record that populates the most inferred collections. */
+function richestRecord(
+  id: EndpointId,
+  records: Array<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  let best: Record<string, unknown> | undefined
+  let bestScore = -1
+  for (const record of records) {
+    const score = scoreCoverage(id, record)
+    if (score > bestScore) {
+      bestScore = score
+      best = record
+    }
+  }
+  return best
+}
+
 /** Remembers IDs from a result so later endpoints have something to ask for. */
 function harvest(id: EndpointId, result: unknown): void {
-  const records = isPageResult(result) ? result.items : [result]
-  const first = records[0] as Record<string, unknown> | undefined
+  const records = (isPageResult(result) ? result.items : [result]).filter(
+    (record): record is Record<string, unknown> =>
+      typeof record === 'object' && record !== null,
+  )
+  const first = records[0]
   if (!first) return
 
   const rememberFrom = (target: string, source: unknown) => {
@@ -171,11 +268,25 @@ function harvest(id: EndpointId, result: unknown): void {
   }
 
   switch (id) {
-    case 'people.getAll':
-      rememberFrom('personId', first['id'])
+    case 'people.getAll': {
+      if (forcedPersonId) {
+        discovered['personId'] ??= forcedPersonId
+        // Still score the page, so the coverage report reflects what was seen.
+        for (const record of records) scoreCoverage(id, record)
+        break
+      }
+      const best = richestRecord(id, records)
+      rememberFrom('personId', best?.['id'])
+      break
+    }
+    case 'people.getInfo':
+      scoreCoverage(id, first)
       break
     case 'groups.getAll':
-      rememberFrom('groupId', first['id'])
+      rememberFrom('groupId', richestRecord(id, records)?.['id'])
+      break
+    case 'groups.getInfo':
+      scoreCoverage(id, first)
       break
     case 'services.getAll':
       rememberFrom('serviceId', first['id'])
@@ -374,6 +485,32 @@ if (undocumented.length > 0) {
   process.stderr.write('\nFields Elvanto returned that our schemas do not declare:\n')
   for (const report of undocumented) {
     process.stderr.write(`  ${report.id}: ${report.undocumentedFields!.join(', ')}\n`)
+  }
+}
+
+// The inferred collections: which are now proven, and which are still guesses.
+const inferredFields = [
+  ...new Set(
+    Object.entries(INFERRED_COLLECTIONS).flatMap(([id, fields]) =>
+      fields.map((field) => `${id.split('.')[0]}.${field}`),
+    ),
+  ),
+].sort()
+const proven = inferredFields.filter((field) => provenPopulated.has(field))
+const unproven = inferredFields.filter((field) => !provenPopulated.has(field))
+
+if (inferredFields.length > 0) {
+  process.stderr.write('\nInferred collection keys (no documented example exists):\n')
+  if (proven.length > 0) {
+    process.stderr.write(`  confirmed by real data: ${proven.join(', ')}\n`)
+  }
+  if (unproven.length > 0) {
+    process.stderr.write(
+      `  still unproven:          ${unproven.join(', ')}\n` +
+        `  Every record swept had these empty, which cannot distinguish a correct\n` +
+        `  key from a wrong one. Re-run against a record that has them —\n` +
+        `  pnpm smoke --person <id> — to settle it.\n`,
+    )
   }
 }
 

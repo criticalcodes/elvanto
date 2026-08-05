@@ -191,6 +191,34 @@ describe('shapes confirmed against a live account', () => {
     expect(person.family?.family_member?.[0]?.relationship).toBe('Spouse')
   })
 
+  test('accepts the inferred person collections in either documented form', async () => {
+    // No read example is published for these, and Elvanto writes them as bare
+    // name strings, so both that and {id, name} must parse. A wrong singular key
+    // is survivable too, via the single-key fallback.
+    const { client } = testClient([
+      {
+        body: {
+          status: 'ok',
+          person: [
+            {
+              id: 'p1',
+              departments: { department: [{ id: 'd1', name: 'Music' }] },
+              demographics: { demographic: ['Adults'] },
+              service_types: { some_other_key: [{ id: 'st1', name: 'Sunday' }] },
+              access_permissions: '',
+            },
+          ],
+        },
+      },
+    ])
+
+    const person = await client.people.getInfo({ id: 'p1' })
+    expect(person.departments).toEqual([{ id: 'd1', name: 'Music' }])
+    expect(person.demographics).toEqual(['Adults'])
+    expect(person.service_types).toEqual([{ id: 'st1', name: 'Sunday' }])
+    expect(person.access_permissions).toEqual([])
+  })
+
   test('reads a People Flow step due rule, including its days', async () => {
     const { client } = testClient([
       {
