@@ -92,7 +92,7 @@ describe('command surface', () => {
 
   test('does not warn about shapes that are confirmed by the docs', async () => {
     await main(['node', 'elvanto', 'songs', 'categories', 'get-all', '--help'])
-    expect(out()).not.toContain('unverified')
+    expect(out()).not.toContain('not been verified against real data')
     expect(out()).toContain('https://www.elvanto.com/api/songs/categories/getAll/')
   })
 })

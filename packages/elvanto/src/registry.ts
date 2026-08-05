@@ -53,10 +53,22 @@ export interface EndpointDefinition {
   /** Link to the endpoint's documentation page. */
   readonly docs: string
   /**
-   * Set when the documentation page could not be read and the shape below is
-   * inferred from sibling endpoints. Verify against a live account.
+   * How far this endpoint's response shape has actually been confirmed.
+   *
+   * - `docs` — matches Elvanto's published example payload. Every endpoint here
+   *   meets this bar; it is the floor, not a warning.
+   * - `live` — additionally observed returning real data from a real account.
+   *
+   * The distinction is worth recording because Elvanto publishes no
+   * machine-readable spec, and a live sweep has already contradicted the
+   * documentation twice: `school_grade` is an object rather than a name, and
+   * `family` is not the person collection its name implies. A `docs`-only
+   * endpoint is probably right, but nothing has tested it against reality — so a
+   * mismatch there is expected rather than surprising, and worth reporting.
+   *
+   * Required, so adding an endpoint forces an explicit answer.
    */
-  readonly unverified?: true
+  readonly verified: 'docs' | 'live'
 }
 
 function defineEndpoint<const D extends EndpointDefinition>(definition: D): D {
@@ -92,6 +104,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'people', itemKey: 'person', item: personSchema },
     docs: 'https://www.elvanto.com/api/people/getAll/',
+    verified: 'live',
   }),
 
   'people.search': defineEndpoint({
@@ -120,6 +133,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'people', itemKey: 'person', item: personSchema },
     docs: 'https://www.elvanto.com/api/people/search/',
+    verified: 'live',
   }),
 
   'people.getInfo': defineEndpoint({
@@ -132,6 +146,7 @@ export const endpoints = {
     }),
     result: { kind: 'single', key: 'person', item: personSchema },
     docs: 'https://www.elvanto.com/api/people/getInfo/',
+    verified: 'live',
   }),
 
   'people.currentUser': defineEndpoint({
@@ -145,6 +160,7 @@ export const endpoints = {
     result: { kind: 'single', key: 'person', item: personSchema },
     auth: 'oauth-only',
     docs: 'https://www.elvanto.com/api/people/currentUser/',
+    verified: 'docs',
   }),
 
   'people.categories.getAll': defineEndpoint({
@@ -154,6 +170,7 @@ export const endpoints = {
     params: z.object({}),
     result: { kind: 'page', collectionKey: 'categories', itemKey: 'category', item: peopleCategorySchema },
     docs: 'https://www.elvanto.com/api/people/categories/getAll/',
+    verified: 'live',
   }),
 
   'people.customFields.getAll': defineEndpoint({
@@ -166,6 +183,7 @@ export const endpoints = {
     params: z.object({}),
     result: { kind: 'page', collectionKey: 'custom_fields', itemKey: 'custom_field', item: customFieldSchema },
     docs: 'https://www.elvanto.com/api/people/customFields/getAll/',
+    verified: 'live',
   }),
 
   // ── People Flows ──────────────────────────────────────────────────────────
@@ -179,6 +197,7 @@ export const endpoints = {
     params: z.object({}),
     result: { kind: 'page', collectionKey: 'people_flows', itemKey: 'people_flow', item: peopleFlowSchema },
     docs: 'https://www.elvanto.com/api/peopleFlows/getAll/',
+    verified: 'live',
   }),
 
   'peopleFlows.steps.getAll': defineEndpoint({
@@ -190,6 +209,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'people_flow_steps', itemKey: 'people_flow_step', item: peopleFlowStepSchema },
     docs: 'https://www.elvanto.com/api/peopleFlows/steps/getAll/',
+    verified: 'live',
   }),
 
   'peopleFlows.steps.people': defineEndpoint({
@@ -210,6 +230,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'people_flow_step_members', itemKey: 'people_flow_step_member', item: peopleFlowStepMemberSchema },
     docs: 'https://www.elvanto.com/api/peopleFlows/steps/people/',
+    verified: 'docs',
   }),
 
   // ── Groups ────────────────────────────────────────────────────────────────
@@ -227,6 +248,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'groups', itemKey: 'group', item: groupSchema },
     docs: 'https://www.elvanto.com/api/groups/getAll/',
+    verified: 'live',
   }),
 
   'groups.getInfo': defineEndpoint({
@@ -241,6 +263,7 @@ export const endpoints = {
     }),
     result: { kind: 'single', key: 'group', item: groupSchema },
     docs: 'https://www.elvanto.com/api/groups/getInfo/',
+    verified: 'live',
   }),
 
   // ── Services ──────────────────────────────────────────────────────────────
@@ -269,6 +292,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'services', itemKey: 'service', item: serviceSchema },
     docs: 'https://www.elvanto.com/api/services/getAll/',
+    verified: 'live',
   }),
 
   'services.getInfo': defineEndpoint({
@@ -284,6 +308,7 @@ export const endpoints = {
     }),
     result: { kind: 'single', key: 'service', item: serviceSchema },
     docs: 'https://www.elvanto.com/api/services/getInfo/',
+    verified: 'live',
   }),
 
   // ── Songs ─────────────────────────────────────────────────────────────────
@@ -300,6 +325,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'songs', itemKey: 'song', item: songSchema },
     docs: 'https://www.elvanto.com/api/songs/getAll/',
+    verified: 'docs',
   }),
 
   'songs.getInfo': defineEndpoint({
@@ -312,6 +338,7 @@ export const endpoints = {
     }),
     result: { kind: 'single', key: 'song', item: songSchema },
     docs: 'https://www.elvanto.com/api/songs/getInfo/',
+    verified: 'docs',
   }),
 
   'songs.categories.getAll': defineEndpoint({
@@ -321,9 +348,10 @@ export const endpoints = {
     params: z.object({ ...paginationParams }),
     result: { kind: 'page', collectionKey: 'categories', itemKey: 'category', item: songCategorySchema },
     // The docs page returns HTTP 500, but appends the error *after* the rendered
-    // documentation, so the parameter table and example response are readable in
-    // the response body and confirm this shape.
+    // documentation, so its parameter table and example response are readable in
+    // the response body.
     docs: 'https://www.elvanto.com/api/songs/categories/getAll/',
+    verified: 'live',
   }),
 
   'songs.arrangements.getAll': defineEndpoint({
@@ -341,6 +369,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'arrangements', itemKey: 'arrangement', item: arrangementSchema },
     docs: 'https://www.elvanto.com/api/songs/arrangements/getAll/',
+    verified: 'docs',
   }),
 
   'songs.arrangements.getInfo': defineEndpoint({
@@ -357,6 +386,7 @@ export const endpoints = {
     }),
     result: { kind: 'single', key: 'arrangement', item: arrangementSchema },
     docs: 'https://www.elvanto.com/api/songs/arrangements/getInfo/',
+    verified: 'docs',
   }),
 
   'songs.keys.getAll': defineEndpoint({
@@ -370,6 +400,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'keys', itemKey: 'key', item: songKeySchema },
     docs: 'https://www.elvanto.com/api/songs/keys/getAll/',
+    verified: 'docs',
   }),
 
   'songs.keys.getInfo': defineEndpoint({
@@ -382,6 +413,7 @@ export const endpoints = {
     }),
     result: { kind: 'single', key: 'key', item: songKeySchema },
     docs: 'https://www.elvanto.com/api/songs/keys/getInfo/',
+    verified: 'docs',
   }),
 
   // ── Calendar ──────────────────────────────────────────────────────────────
@@ -392,6 +424,7 @@ export const endpoints = {
     params: z.object({}),
     result: { kind: 'page', collectionKey: 'calendars', itemKey: 'calendar', item: calendarSchema },
     docs: 'https://www.elvanto.com/api/calendar/getAll/',
+    verified: 'live',
   }),
 
   'calendar.events.getAll': defineEndpoint({
@@ -412,6 +445,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'events', itemKey: 'event', item: calendarEventSchema },
     docs: 'https://www.elvanto.com/api/calendar/events/getAll/',
+    verified: 'live',
   }),
 
   // ── Financial ─────────────────────────────────────────────────────────────
@@ -433,6 +467,7 @@ export const endpoints = {
     }),
     result: { kind: 'page', collectionKey: 'transactions', itemKey: 'transaction', item: transactionSchema },
     docs: 'https://www.elvanto.com/api/financial/transactions/getAll/',
+    verified: 'docs',
   }),
 
   'financial.transactions.getInfo': defineEndpoint({
@@ -444,6 +479,7 @@ export const endpoints = {
     }),
     result: { kind: 'single', key: 'transaction', item: transactionSchema },
     docs: 'https://www.elvanto.com/api/financial/transactions/getInfo/',
+    verified: 'docs',
   }),
 
   'financial.categories.getAll': defineEndpoint({
@@ -453,6 +489,7 @@ export const endpoints = {
     params: z.object({ ...paginationParams }),
     result: { kind: 'page', collectionKey: 'categories', itemKey: 'category', item: financialCategorySchema },
     docs: 'https://www.elvanto.com/api/financial/categories/getAll/',
+    verified: 'docs',
   }),
 } as const satisfies Record<string, EndpointDefinition>
 
@@ -481,7 +518,7 @@ export const endpointIds = Object.keys(endpoints) as EndpointId[]
 
 // The intersection matters: the literal type carries the precise parameter
 // schema, while EndpointDefinition guarantees the optional fields (`notes`,
-// `auth`, `unverified`) exist to be read on every endpoint.
+// `auth`, `verified`) exist to be read on every endpoint.
 export function getEndpoint<K extends EndpointId>(
   id: K,
 ): EndpointRegistry[K] & EndpointDefinition

@@ -154,30 +154,44 @@ describe('tool listing', () => {
     expect(peopleGetAll.description).toContain('https://www.elvanto.com/api/people/getAll/')
   })
 
-  test('warns in the description when an endpoint shape is unverified', () => {
-    // No registered endpoint is unverified today — every shape has been checked
-    // against Elvanto's docs — so the mechanism is exercised directly, to keep it
-    // working for endpoints added later from incomplete documentation.
-    const unverified = toolDescription(
-      {
-        id: 'widgets.getAll',
-        path: 'widgets/getAll',
-        summary: 'List widgets.',
-        params: z.object({}),
-        result: { kind: 'single', key: 'widget', item: z.looseObject({}) },
-        docs: 'https://www.elvanto.com/api/widgets/getAll/',
-        unverified: true,
-      },
-      25,
-    )
-    expect(unverified).toContain('documentation page')
-    expect(unverified).toContain('may differ')
+  test('tells a model when a shape has not met real data', () => {
+    const describe_ = (verified: 'docs' | 'live') =>
+      toolDescription(
+        {
+          id: 'widgets.getAll',
+          path: 'widgets/getAll',
+          summary: 'List widgets.',
+          params: z.object({}),
+          result: { kind: 'single', key: 'widget', item: z.looseObject({}) },
+          docs: 'https://www.elvanto.com/api/widgets/getAll/',
+          verified,
+        },
+        25,
+      )
 
-    // And a verified endpoint carries no such warning.
-    const verified = buildTools().find(
-      (tool: Tool) => tool.name === 'elvanto_songs_categories_get_all',
-    )!
-    expect(verified.description).not.toContain('may differ')
+    expect(describe_('docs')).toContain('not been verified against real data')
+    expect(describe_('docs')).toContain('may differ')
+    // A live-verified endpoint carries no such caveat, so the note stays
+    // meaningful rather than appearing on everything.
+    expect(describe_('live')).not.toContain('may differ')
+  })
+
+  test('carries the caveat on the endpoints that actually lack live data', async () => {
+    const { client } = await connect(() => peoplePage)
+    const { tools } = await client.listTools()
+    const byName = new Map(tools.map((tool) => [tool.name, tool]))
+
+    // Songs and financial were unreachable in the account swept.
+    expect(byName.get('elvanto_songs_get_info')!.description).toContain(
+      'not been verified against real data',
+    )
+    expect(byName.get('elvanto_financial_transactions_get_all')!.description).toContain(
+      'not been verified against real data',
+    )
+    // People and groups were exercised for real.
+    expect(byName.get('elvanto_people_get_all')!.description).not.toContain(
+      'not been verified against real data',
+    )
   })
 
   test('flags the OAuth-only endpoint', () => {

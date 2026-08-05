@@ -50,6 +50,11 @@ export type TransactionAmount = z.output<typeof transactionAmountSchema>
 /**
  * A financial transaction.
  *
+ * Not yet confirmed against a live account: the account swept had no chart of
+ * accounts and no transactions, so this follows the documented example only.
+ * Worth treating with particular care, because the documented examples disagree
+ * with each other more here than anywhere else in the API.
+ *
  * Elvanto quotes monetary values inconsistently — `125` from `getAll` and
  * `"360.00"` from `getInfo` for the same field — so totals are normalized to
  * numbers. The `created_by_*` / `updated_by_*` name fields are explicitly `null`

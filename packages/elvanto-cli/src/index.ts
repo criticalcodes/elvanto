@@ -138,11 +138,15 @@ export function buildProgram(): Command {
       for (const id of endpointIds) {
         const endpoint = getEndpoint(id)
         const command = toCliPath(id).join(' ')
-        const flag = endpoint.unverified ? ' [unverified]' : ''
+        const mark = endpoint.verified === 'live' ? '' : ' *'
         process.stdout.write(
-          `${command.padEnd(width)}  ${endpoint.summary}${flag}\n`,
+          `${command.padEnd(width)}  ${endpoint.summary}${mark}\n`,
         )
       }
+      process.stdout.write(
+        '\n* Response shape matches Elvanto\'s documented example but has not yet\n' +
+          '  been seen returning real data. Please report anything unexpected.\n',
+      )
     })
 
   for (const id of endpointIds) {
@@ -169,10 +173,10 @@ function attachEndpoint(program: Command, endpoint: EndpointDefinition): void {
   const command = parent
     .command(action)
     .description(
-      endpoint.unverified
-        ? `${endpoint.summary} (Shape unverified — Elvanto's docs page for this ` +
-            `endpoint is unavailable. Report anything unexpected.)`
-        : endpoint.summary,
+      endpoint.verified === 'live'
+        ? endpoint.summary
+        : `${endpoint.summary} (This endpoint's response shape matches Elvanto's ` +
+            `documentation but has not been verified against real data.)`,
     )
     .addHelpText('after', `\nDocumentation: ${endpoint.docs}`)
 

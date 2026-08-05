@@ -102,12 +102,37 @@ describe('registry integrity', () => {
     expect(() => getEndpoint('people.nope')).toThrowError(/Known ids/)
   })
 
-  test('every endpoint shape is confirmed against the documentation', () => {
-    // The `unverified` flag stays in the model for endpoints added from
-    // incomplete docs, but every endpoint currently registered has had its
-    // parameters and response shape checked against Elvanto's published example.
+  test('every endpoint declares how far it has been verified', () => {
     const all: EndpointDefinition[] = Object.values(endpoints)
-    expect(all.filter((e) => e.unverified).map((e) => e.id)).toEqual([])
+    for (const endpoint of all) {
+      expect(['docs', 'live'], endpoint.id).toContain(endpoint.verified)
+    }
+  })
+
+  test('records exactly which endpoints have met real data', () => {
+    // Pinned deliberately. This is the honest record of what a live sweep has
+    // actually exercised, and it should only ever move in one direction — so a
+    // change here needs a real sweep behind it, not a hopeful edit.
+    const all: EndpointDefinition[] = Object.values(endpoints)
+    const docsOnly = all.filter((e) => e.verified === 'docs').map((e) => e.id).sort()
+
+    expect(docsOnly).toEqual([
+      // No chart of accounts or transactions in the account swept.
+      'financial.categories.getAll',
+      'financial.transactions.getAll',
+      'financial.transactions.getInfo',
+      // Requires OAuth, which is not implemented yet.
+      'people.currentUser',
+      // The endpoint answered, but no member records existed to shape-check.
+      'peopleFlows.steps.people',
+      // No songs in the account swept, so nothing downstream could be reached.
+      'songs.arrangements.getAll',
+      'songs.arrangements.getInfo',
+      'songs.getAll',
+      'songs.getInfo',
+      'songs.keys.getAll',
+      'songs.keys.getInfo',
+    ])
   })
 })
 

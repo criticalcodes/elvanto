@@ -29,6 +29,11 @@ export type SongFile = z.output<typeof songFileSchema>
 /**
  * A song.
  *
+ * Not yet confirmed against a live account — the account swept had no songs — so
+ * everything here follows Elvanto's documented example only. `sequence` in
+ * particular is an array on these endpoints but `""` on the copy embedded in a
+ * service, which is the kind of inconsistency real data tends to reveal.
+ *
  * `status` is Elvanto's own numeric state, not a boolean, so it is left
  * untouched. `item`, `learn` and `allow_downloads` are documented 1/0 flags and
  * are normalized to booleans.

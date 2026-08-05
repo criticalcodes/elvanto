@@ -159,13 +159,31 @@ Values are redacted by default — this reads real member data. Add
 `--include-data` for samples, `--financial` to include giving records (excluded
 by default), and `--json report.json` for the full report.
 
-Every endpoint's parameters and response shape has been checked against Elvanto's
-published example payloads. A handful of sub-collections are the exception, and
-are the main thing this sweep exists to settle: `departments`, `demographics`,
-`service_types`, `access_permissions` and `family` on a person, and the group
-sub-collections. Elvanto names those fields but never shows one populated, so both
-the wrapper key and the item shape are inferred. They fail loudly rather than
-returning empty data, so the sweep will say so.
+### What has actually been verified
+
+Every endpoint's parameters and response shape is checked against Elvanto's
+published example — that's the floor. A live sweep has additionally confirmed 14
+of the 25 against real data, and each endpoint records which in its registry entry
+(`verified: 'docs' | 'live'`). `elvanto endpoints` marks the difference, and the
+MCP tool descriptions carry a caveat for the `docs`-only ones.
+
+The distinction is worth keeping because a live sweep has already contradicted the
+documentation twice: `school_grade` is an object rather than the name it's
+documented as, and `family` is not the person collection its name implies. So a
+`docs`-only endpoint is *probably* right, but nothing has tested it.
+
+Still `docs`-only, and why:
+
+| Endpoints | Why |
+| --- | --- |
+| `songs.*` (5) | No songs in the account swept, so nothing downstream was reachable |
+| `financial.*` (3) | No chart of accounts and no transactions. Also where the published examples disagree with each other most |
+| `peopleFlows.steps.people` | The endpoint answered, but no step had members to shape-check |
+| `people.currentUser` | Requires OAuth, which isn't implemented yet |
+
+Within services, the envelope, `service_times` and the whole `volunteers` tree
+were exercised for real; `plans`, `songs`, `files` and `notes` came back empty
+everywhere, so those four remain documentation-only.
 
 ## Development
 

@@ -137,6 +137,12 @@ export type ServiceNote = z.output<typeof serviceNoteSchema>
  *
  * `status` is Elvanto's numeric published/draft state and is left as-is.
  * Everything from `series_name` down appears only when requested via `fields`.
+ *
+ * Partially confirmed against a live account: the envelope, `service_times` and
+ * the full `volunteers` tree (plan → position → volunteer → person) were
+ * exercised for real. `plans`, `songs`, `files` and `notes` came back empty on
+ * every service swept, so those four sub-structures still follow the
+ * documentation alone.
  */
 export const serviceSchema = z.looseObject({
   id: id,

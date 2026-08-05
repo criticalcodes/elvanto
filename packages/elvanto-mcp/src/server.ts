@@ -140,10 +140,10 @@ export function toolDescription(
   if (endpoint.auth === 'oauth-only') {
     parts.push('Requires OAuth; unavailable when the server is configured with an API key.')
   }
-  if (endpoint.unverified) {
+  if (endpoint.verified !== 'live') {
     parts.push(
-      "Note: Elvanto's documentation page for this endpoint is unavailable, so " +
-        'the response shape is inferred and may differ.',
+      "Note: this endpoint's response shape follows Elvanto's documentation but " +
+        'has not been verified against real data, so it may differ.',
     )
   }
   parts.push(`Docs: ${endpoint.docs}`)

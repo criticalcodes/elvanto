@@ -59,13 +59,6 @@ export const peopleFlowStepAdminSchema = z.looseObject({
 export type PeopleFlowStepAdmin = z.output<typeof peopleFlowStepAdminSchema>
 
 /**
- * A step in full detail, including the instructions and description that
- * `peopleFlows/getAll` omits.
- *
- * Note `admins` here is a list of objects, whereas the same key on the flow
- * summary is a list of ID strings.
- */
-/**
  * A step's due rule. Elvanto sends `""` when the step has no due date, so this
  * must tolerate an empty string rather than expecting an object.
  */
@@ -77,6 +70,13 @@ export const stepDueSchema = z.looseObject({
   date: dateString.optional(),
 })
 
+/**
+ * A step in full detail, including the instructions and description that
+ * `peopleFlows/getAll` omits.
+ *
+ * Note `admins` here is a list of objects, whereas the same key on the flow
+ * summary is a list of ID strings.
+ */
 export const peopleFlowStepSchema: z.ZodType<PeopleFlowStep> = z.lazy(() =>
   z.looseObject({
     id: id,
@@ -110,7 +110,7 @@ export interface PeopleFlowStep {
   status?: unknown
   description?: string | undefined
   instructions?: string | undefined
-  notifications?: unknown
+  notifications?: boolean | undefined
   entry_point?: unknown
   hide_pending?: number | undefined
   step_due?: StepDue | undefined
@@ -124,6 +124,10 @@ export interface PeopleFlowStep {
  *
  * `id` is the person's ID; `flow_step_member_id` identifies their membership of
  * this step.
+ *
+ * Not yet confirmed against a live account: the endpoint answered, but no step
+ * had members to shape-check. The nullable fields here come from the documented
+ * example alone.
  */
 export const peopleFlowStepMemberSchema = z.looseObject({
   id: id,
