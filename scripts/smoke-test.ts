@@ -92,6 +92,31 @@ const INFERRED_COLLECTIONS: Record<string, readonly string[]> = {
 /** `endpoint.field` entries seen with at least one member, across the sweep. */
 const provenPopulated = new Set<string>()
 
+/**
+ * Every documented optional field for a person.
+ *
+ * Requested in full so `unseenFields` means "Elvanto did not return this even
+ * though we asked" — otherwise the report flags fields that were simply never
+ * requested, which buries the real signal.
+ */
+const PERSON_OPTIONAL_FIELDS = [
+  'gender', 'birthday', 'anniversary', 'school_grade', 'marital_status',
+  'development_child', 'special_needs_child', 'security_code', 'receipt_name',
+  'giving_number',
+  'mailing_address', 'mailing_address2', 'mailing_city', 'mailing_state',
+  'mailing_postcode', 'mailing_country',
+  'home_address', 'home_address2', 'home_city', 'home_state', 'home_postcode',
+  'home_country',
+  'locations', 'departments', 'demographics', 'service_types',
+  'access_permissions',
+]
+
+/** Every documented optional field for a service. */
+const SERVICE_OPTIONAL_FIELDS = [
+  'series_name', 'service_times', 'rehearsal_times', 'other_times', 'plans',
+  'volunteers', 'songs', 'files', 'notes', 'picture',
+]
+
 const warnings: ElvantoValidationWarning[] = []
 
 if (!process.env['ELVANTO_API_KEY'] && !process.env['ELVANTO_ACCESS_TOKEN']) {
@@ -129,22 +154,14 @@ function paramsFor(id: EndpointId): Record<string, unknown> | 'skip' {
       // A wide page, because the record that settles the inferred collections is
       // whoever is in the most departments — usually an admin, rarely the first
       // person alphabetically.
-      return {
-        page_size: 100,
-        fields: [
-          'gender', 'birthday', 'anniversary', 'school_grade', 'marital_status',
-          'locations', 'departments', 'demographics', 'service_types',
-          'access_permissions', 'mailing_address', 'home_address',
-        ],
-      }
+      return { page_size: 100, fields: PERSON_OPTIONAL_FIELDS }
     case 'people.search':
       return { page_size: 10, search: { archived: 'no' } }
     case 'people.getInfo':
+      // `family` and `reports_to` are documented as retrieve-only, so they appear
+      // here but not on getAll.
       return requireId('personId', {
-        fields: [
-          'locations', 'family', 'reports_to', 'departments', 'demographics',
-          'service_types', 'access_permissions', 'school_grade',
-        ],
+        fields: [...PERSON_OPTIONAL_FIELDS, 'family', 'reports_to'],
       })
     case 'people.currentUser':
       // API keys cannot use this endpoint; only meaningful under OAuth.
@@ -159,18 +176,9 @@ function paramsFor(id: EndpointId): Record<string, unknown> | 'skip' {
         fields: ['people', 'categories', 'departments', 'demographics', 'locations'],
       })
     case 'services.getAll':
-      return {
-        page_size: 10,
-        all: 'yes',
-        fields: [
-          'series_name', 'service_times', 'rehearsal_times', 'other_times',
-          'plans', 'volunteers', 'songs', 'files', 'notes', 'picture',
-        ],
-      }
+      return { page_size: 10, all: 'yes', fields: SERVICE_OPTIONAL_FIELDS }
     case 'services.getInfo':
-      return requireId('serviceId', {
-        fields: ['series_name', 'service_times', 'plans', 'volunteers', 'songs', 'files', 'notes'],
-      })
+      return requireId('serviceId', { fields: SERVICE_OPTIONAL_FIELDS })
     case 'songs.getAll':
       return { page_size: 10, files: true }
     case 'songs.getInfo':
@@ -288,9 +296,22 @@ function harvest(id: EndpointId, result: unknown): void {
     case 'groups.getInfo':
       scoreCoverage(id, first)
       break
-    case 'services.getAll':
-      rememberFrom('serviceId', first['id'])
+    case 'services.getAll': {
+      // Prefer a service with a plan and songs: empty arrays prove nothing about
+      // the plan-item and service-song schemas.
+      const scored = records
+        .map((record) => ({
+          record,
+          score:
+            (Array.isArray(record['plans']) && record['plans'].length > 0 ? 2 : 0) +
+            (Array.isArray(record['songs']) && record['songs'].length > 0 ? 2 : 0) +
+            (Array.isArray(record['volunteers']) && record['volunteers'].length > 0 ? 1 : 0) +
+            (Array.isArray(record['notes']) && record['notes'].length > 0 ? 1 : 0),
+        }))
+        .sort((a, b) => b.score - a.score)
+      rememberFrom('serviceId', scored[0]?.record['id'])
       break
+    }
     case 'songs.getAll':
       rememberFrom('songId', first['id'])
       break
