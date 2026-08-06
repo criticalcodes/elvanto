@@ -11,38 +11,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The development pipeline. Pinned to a single Node version because pnpm 11
+  # requires 22.13+ (it loads node:sqlite), so the toolchain has a higher floor
+  # than the packages do. Runtime support is checked separately, below.
   verify:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # The oldest version package.json claims to support, and current LTS.
-        node: [20, 22]
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
-      # Typecheck and test both resolve the SDK to source, so neither needs a
-      # build. The build runs anyway, because a broken d.ts emit would only ever
-      # be caught here.
+      # Typecheck and test resolve the SDK to source, so neither needs a build.
+      # The build runs anyway, because a broken d.ts emit would only surface here.
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
 
-      # Guard the thing CI cannot otherwise see: that the published tarballs
-      # contain what they should, and no more.
-      - name: Check package contents
+      - name: Pack the SDK for the runtime check
+        run: |
+          cd packages/elvanto
+          npm pack --pack-destination "$RUNNER_TEMP"
+          ls "$RUNNER_TEMP"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-tarball
+          path: ${{ runner.temp }}/*.tgz
+          retention-days: 1
+
+      # Visible in the log, so a change to published contents is reviewable.
+      - name: Show package contents
         run: |
           for dir in packages/*; do
             echo "--- $dir"
             (cd "$dir" && npm pack --dry-run 2>&1 | sed 's/^npm notice //')
           done
+
+  # Checks the built artifact on every Node version the packages claim to support.
+  # Installs with plain npm, because the point is to exercise what a consumer
+  # actually gets rather than the workspace.
+  runtime-compat:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor declared in packages/*/package.json engines, and current LTS.
+        node: [20, 22, 24]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-tarball
+          path: ${{ runner.temp }}/tarball
+
+      - name: Install the packed SDK and run it
+        run: |
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          npm init -y >/dev/null
+          npm pkg set type=module >/dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/tarball/*.tgz
+          cp "$GITHUB_WORKSPACE/scripts/runtime-check.mjs" .
+          node runtime-check.mjs

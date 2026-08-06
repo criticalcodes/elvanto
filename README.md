@@ -205,10 +205,16 @@ everywhere, so those four remain documentation-only.
 pnpm install
 pnpm build          # all three packages
 pnpm typecheck      # includes compile-time type assertions
-pnpm test           # 258 tests, no network
+pnpm test           # 273 tests, no network
 pnpm test:coverage
 pnpm smoke          # live sweep, needs a real API key
 ```
+
+Developing here needs **Node 22.13+**, because pnpm 11 does. The published packages
+support **Node 20+**, which is a separate claim and tested separately: CI packs the
+SDK and runs `scripts/runtime-check.mjs` against the tarball on Node 20, 22 and 24,
+installed with plain npm. Narrowing `engines` to match the toolchain would have been
+easier and false.
 
 Tests never touch the network: the SDK takes an injected `fetch`, and the CLI and
 MCP tests run against a local stub server and an in-memory MCP transport
