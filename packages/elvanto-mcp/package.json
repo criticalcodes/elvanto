@@ -19,6 +19,14 @@
   "bin": {
     "elvanto-mcp": "./dist/index.js"
   },
+  "main": "./dist/lib.js",
+  "types": "./dist/lib.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib.d.ts",
+      "default": "./dist/lib.js"
+    }
+  },
   "files": [
     "dist",
     "README.md",
@@ -33,7 +41,7 @@
     "chms"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "rm -rf dist && tsup",
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/index.ts"
   },

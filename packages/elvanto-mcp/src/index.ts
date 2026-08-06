@@ -1,9 +1,11 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer } from './server.js'
+import { serveHttp } from './serve.js'
 import { planStartup } from './startup.js'
 
 /**
- * Entry point for the Elvanto MCP server, speaking MCP over stdio.
+ * Entry point for the Elvanto MCP server, speaking MCP over stdio or streamable
+ * HTTP.
  *
  * Configuration comes from the environment, because that is how MCP clients
  * launch a server. See `planStartup` for what is accepted, and `--help` for the
@@ -26,6 +28,28 @@ async function main(): Promise<void> {
 
   for (const warning of plan.warnings) {
     process.stderr.write(`[elvanto-mcp] Warning: ${warning}\n`)
+  }
+
+  if (plan.transport.kind === 'http') {
+    const { host, port, token } = plan.transport
+    const running = await serveHttp(plan.config, {
+      host,
+      port,
+      ...(token ? { token } : {}),
+    })
+    // stdout is free in HTTP mode — nothing speaks MCP on it — but stderr keeps
+    // every diagnostic in one stream regardless of transport.
+    process.stderr.write(
+      `[elvanto-mcp] Listening on http://${running.host}:${running.port}/ ` +
+        `(${token ? 'bearer token required' : 'no authentication'})\n`,
+    )
+
+    const shutdown = () => {
+      void running.close().finally(() => process.exit(0))
+    }
+    process.on('SIGINT', shutdown)
+    process.on('SIGTERM', shutdown)
+    return
   }
 
   const server = createServer(plan.config)

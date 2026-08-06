@@ -1,0 +1,249 @@
+# @criticalcodes/elvanto-agent
+
+A [Flue](https://flueframework.com) agent toolkit for the
+[Elvanto](https://www.elvanto.com) church management API. Six tools that each
+answer a whole question, all 25 raw endpoints in-process, and one binary that runs
+the agent as a CLI, an HTTP server or a Worker.
+
+Read-only: nothing here can modify your Elvanto data.
+
+> Unofficial. Not affiliated with or endorsed by Elvanto.
+
+```ts
+// src/agents/church.ts — in your project, not this package
+'use agent'
+import { useModel } from '@flue/runtime'
+import { useElvantoBase } from '@criticalcodes/elvanto-agent'
+
+export function Church() {
+  useModel('anthropic/claude-sonnet-5')
+  useElvantoBase()
+  return 'You help our office team with rosters and member admin.'
+}
+```
+
+```console
+$ church "Who is on the roster this Sunday?"   # see the one-binary section
+$ flue run src/agents/church.ts --message "Who is on the roster this Sunday?"
+```
+
+## It ships a toolkit, not an agent
+
+Flue discovers agents by scanning **your project's** source root for `'use agent'`
+modules — never `node_modules`. An agent function imported from a package is never
+registered, so no package can ship one that works. What a package *can* ship is
+everything an agent is composed of, which is what this is:
+
+| Export | What it is |
+| --- | --- |
+| `useElvantoBase()` | Mounts the tools, the raw endpoints and the base instruction |
+| `findPerson`, `roster`, `nextServing`, `serviceBrief`, `songHistory`, `listCustomFields` | The tools individually, as factories |
+| `endpointTools()`, `CORE_ENDPOINTS`, `ALL_ENDPOINTS` | The 25 raw endpoints as native tools |
+| `runElvantoCli()` (from `/cli`) | The one-binary runner: chat, serve, web UI |
+| `elvantoMcpConnection()` | A remote MCP connection, if you have one |
+| `clientFromEnv()` | The shared Elvanto client, with agent-appropriate defaults |
+| `personCard`, `rosterEntries`, `serviceHeader`, … | The shaping helpers, for building your own tools |
+
+`src/` is published in the tarball too, so `src/agents/elvanto.ts` — a complete
+working agent in about a dozen lines — can be copied straight into your project.
+
+## The tools
+
+Each one collapses a multi-call workflow into a single call with a small result.
+That is the whole justification: the raw endpoints are faithful to Elvanto, which
+is right for a library and wrong for a model's context window.
+
+| Tool | Answers | Why it isn't just the raw endpoint |
+| --- | --- | --- |
+| `find_person` | "Who is Josh Cuneo?" | Elvanto ANDs search keys, so free text needs several attempts merged. Returns four fields per person, not forty. |
+| `roster` | "Who is serving this Sunday?" | The roster is four levels of nesting, keyed `plan` — the same word Elvanto uses for running sheets. Flattened to one row per person. |
+| `next_serving` | "When is Ada next on?" | Elvanto has **no** person-centric roster endpoint. The only way is to walk services and search each volunteer tree. |
+| `service_brief` | "What's on this Sunday?" | Optional sections only come back when named in `fields`, which a model forgets — then concludes there are no songs. |
+| `song_history` | "When did we last sing this?" | Song usage lives on services, not songs. Sweeps a year and aggregates. |
+| `list_custom_fields` | "What custom fields exist?" | Custom fields are `custom_<uuid>` keys that differ per account and cannot be guessed. |
+
+Every tool caps its result and **says when it trimmed**. A silently shortened list
+reads as a complete answer, and a model will present it as one.
+
+## Setup
+
+```console
+$ npm install @criticalcodes/elvanto-agent @flue/runtime
+```
+
+`@flue/runtime` is a peer dependency on purpose: Flue's hooks rely on
+module-scoped state, so your project must own the single runtime instance. Two
+copies would not work.
+
+`@criticalcodes/elvanto-mcp` is **not** a dependency, and is not needed to reach
+Elvanto — the endpoint tools do that in-process. `src/app.ts` imports it only to
+*serve* MCP to other hosts from the same deployment; add it yourself if you copy
+that file.
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `ELVANTO_API_KEY` | yes | Secret API key. Elvanto → Settings → Account Settings. |
+| `ELVANTO_ACCESS_TOKEN` | — | OAuth token, instead of a key. |
+| `ELVANTO_MCP_URL` | — | Only for a *remote* MCP server. Not needed for the Elvanto endpoints. |
+| `ELVANTO_MCP_TOKEN` | — | Bearer token for that server. |
+| `ELVANTO_VALIDATE` | — | `warn` (default here), `throw`, or `off`. |
+| `ELVANTO_MIN_REQUEST_INTERVAL_MS` | — | Request pacing. Default 100. |
+| `ELVANTO_DEBUG` | — | `on` or `verbose` — to stderr, never records. |
+
+Two defaults differ from the SDK's, both because an agent session is a poor place
+to be strict:
+
+- **`validate: 'warn'`.** These response schemas are derived from Elvanto's
+  documentation, so an undocumented field is expected rather than exceptional.
+  Under `throw` one new field fails a tool call mid-conversation with nothing the
+  model can do about it.
+- **Request pacing is on.** Several tools walk pages of services to answer one
+  question, and Elvanto documents no rate limit — so the ceiling is found by
+  hitting it.
+
+Credentials are read lazily, at the first tool call rather than during the agent
+render. A missing key would otherwise throw before the agent exists, killing the
+session with an internal error instead of a message the model can relay.
+
+## The raw endpoints — no second process
+
+The six tools cover the common questions; the other 25 read-only endpoints are
+mounted too, as **native Flue tools calling the SDK in-process**. No MCP server, no
+port, no bearer token, nothing to supervise.
+
+This used to require running `@criticalcodes/elvanto-mcp` over HTTP and pointing
+the agent at it, because Flue's MCP client speaks HTTP only. That was a round trip
+to nowhere: serialise a call to JSON-RPC, push it over a socket to a second process,
+and have that process call the same `client.call()` this one could have called
+directly. The MCP server's tools are generated from the same registry these are, so
+it bought nothing.
+
+Names and descriptions are identical to the MCP surface, so an instruction, an
+allowlist or a transcript reads the same either way.
+
+`'core'` is the default — the endpoints that *add* to the six tools rather than
+duplicating them, with three deliberate omissions:
+
+- **Every financial endpoint.** Individual giving records are the most sensitive
+  thing an API key reaches, and an agent runtime persists tool results. Opt in with
+  `endpoints: 'all'` if you have decided to.
+- **`people.search`** — `find_person` does the same job better; offering both
+  invites the model to pick the harder one.
+- **`people.currentUser`** — OAuth-only, so with an API key it can only fail.
+
+```ts
+useElvantoBase({ endpoints: 'all' })                      // giving data included
+useElvantoBase({ endpoints: ['groups.getAll'] })          // an explicit list
+useElvantoBase({ endpoints: false })                      // the six tools only
+useElvantoBase({ tools: ['find_person', 'roster'] })      // narrow those too
+```
+
+**MCP still matters — for other hosts.** `@criticalcodes/elvanto-mcp` is the right
+answer when the host is somebody else's: Claude Desktop, a remote connector,
+another framework. It is the wrong answer for talking to yourself. If you do have a
+genuinely remote MCP server, `mcp: { url, token }` connects one.
+
+## One binary: CLI, server, or Worker
+
+`@criticalcodes/elvanto-agent/cli` runs an agent three ways from a single
+executable. It leans on Flue's `start({ agents })`, which boots the runtime in the
+current process with no server, no `app.ts` and no `'use agent'` scan — so the CLI
+needs neither Vite nor Wrangler.
+
+```ts
+#!/usr/bin/env node
+import { runElvantoCli } from '@criticalcodes/elvanto-agent/cli'
+import { Church } from './agents/church.ts'
+
+await runElvantoCli({ agent: Church, name: 'church' })
+```
+
+```console
+$ church "who is on the roster this Sunday?"   # one question, answer on stdout
+$ church                                       # interactive terminal chat
+$ church serve                                 # HTTP API + a web chat UI on :8787
+$ echo "who is serving?" | church              # pipeable
+```
+
+- **Terminal chat** is a plain `readline` transcript — no full-screen renderer, so
+  scrollback and piping keep working.
+- **`serve`** mounts the agent's routes and a self-contained web chat page at `/`.
+  One HTML file, no bundler, no framework, works the same on Node and Workers. It
+  polls rather than streams; for a real application use
+  [`@flue/react`](https://flueframework.com/docs/guide/react/)'s `useFlueAgent()`.
+- **Conversations persist** in `./<name>.db`, so `--id` continues one across runs.
+- **Extra subcommands** come from `commands`, for a scheduled job worth running by
+  hand.
+
+Cloudflare still builds through Vite, because Durable Object codegen requires it —
+but it imports the same agent module, so behaviour is identical across all three.
+
+## Extending it
+
+`useElvantoBase()` is a custom hook in Flue's own idiom, so composition is just
+more hooks. This is how anything account-specific stays out of a public package:
+
+```ts
+'use agent'
+import { useModel, useTool } from '@flue/runtime'
+import { useElvantoBase } from '@criticalcodes/elvanto-agent'
+import { credentialTools } from '../compliance/index.ts'   // yours
+import { profile } from '../compliance/profile.ts'         // yours
+
+export function Church() {
+  useModel('anthropic/claude-sonnet-5')
+  useElvantoBase()
+  for (const tool of credentialTools(profile)) useTool(tool)
+  return 'You help our office team, and you chase expiring credentials.'
+}
+```
+
+Build your own tools on the exported shaping helpers, so their results look like
+the rest of the toolkit's:
+
+```ts
+import { defineTool } from '@flue/runtime'
+import { clientFromEnv, personCard, isoDate } from '@criticalcodes/elvanto-agent'
+```
+
+## Running and deploying
+
+`flue run` is a complete shipping method, not a fallback — it needs no server:
+
+```console
+$ pnpm agent -- --message "Who is serving on Sunday?"
+$ pnpm agent -- --id office --message "And the week after?"   # continues a conversation
+```
+
+For an HTTP surface, `src/app.ts` mounts the agent and — when `ELVANTO_MCP_TOKEN`
+is set — an MCP endpoint, so one deployment can also serve other MCP hosts:
+
+```console
+$ pnpm dev                                    # :5173
+$ pnpm deploy                                 # Cloudflare Worker
+$ FLUE_TARGET=node pnpm build:app             # dist-app/server.mjs, for Docker/Fly/Railway/…
+```
+
+Cloudflare needs its secrets set with `wrangler secret put` — an API key that reads
+every member and giving record does not belong in `wrangler.jsonc`.
+
+## Privacy
+
+This toolkit reads church member records. Worth deciding about deliberately:
+
+- **An agent runtime persists conversations, tool results included.** Member
+  details retrieved during a session end up in whatever store backs it, with a
+  lifetime and access model that has nothing to do with Elvanto's. That is a
+  materially different risk from an ephemeral chat.
+- **The compact shapes are a privacy measure, not only a token one.**
+  `src/shape.ts` names the fields that leave, so addresses, giving numbers,
+  security codes and custom fields cannot reach a transcript just because they
+  happened to be on the record.
+- **Tool logs carry counts, never content** — no names, no query strings, no
+  records.
+- **Narrowing what the agent can reach beats scrubbing afterwards.** Fewer tools,
+  or an API key scoped without financial access.
+
+## License
+
+MIT

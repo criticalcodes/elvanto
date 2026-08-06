@@ -1,6 +1,25 @@
 import { ElvantoError } from '@criticalcodes/elvanto'
 import { configFromEnv, SERVER_VERSION, type ServerConfig } from './server.js'
 
+/** Where the server should listen. */
+export type TransportPlan =
+  /** MCP over stdio, launched by a client. The default. */
+  | { kind: 'stdio' }
+  /** MCP over streamable HTTP, for hosts that speak only HTTP. */
+  | { kind: 'http'; host: string; port: number; token?: string }
+
+/** Default HTTP port. Above the range dev servers usually squat on. */
+export const DEFAULT_HTTP_PORT = 3001
+
+/**
+ * Default HTTP bind address: loopback only.
+ *
+ * Serving this on `0.0.0.0` publishes every member and giving record in the
+ * account to the local network, so reaching the network is an explicit act
+ * (`--host`) and, per {@link planStartup}, requires a token.
+ */
+export const DEFAULT_HTTP_HOST = '127.0.0.1'
+
 /**
  * What the process should do, decided before any I/O.
  *
@@ -9,13 +28,27 @@ import { configFromEnv, SERVER_VERSION, type ServerConfig } from './server.js'
  */
 export type StartupPlan =
   | { action: 'print'; text: string; exitCode: 0 }
-  | { action: 'serve'; config: ServerConfig; warnings: string[] }
+  | {
+      action: 'serve'
+      config: ServerConfig
+      transport: TransportPlan
+      warnings: string[]
+    }
   | { action: 'fail'; message: string; exitCode: 1 }
 
 export const HELP = `elvanto-mcp ${SERVER_VERSION}
 
-An MCP server exposing read-only Elvanto API endpoints as tools. It speaks MCP
-over stdio and is meant to be launched by an MCP client, not run by hand.
+An MCP server exposing read-only Elvanto API endpoints as tools. By default it
+speaks MCP over stdio and is meant to be launched by an MCP client, not run by
+hand. Pass --http to serve streamable HTTP instead, for hosts that cannot launch
+a subprocess.
+
+Options:
+  --http                          Serve streamable HTTP instead of stdio
+  --port <n>                      HTTP port (default ${DEFAULT_HTTP_PORT})
+  --host <address>                HTTP bind address (default ${DEFAULT_HTTP_HOST})
+  --help, -h                      Print this and exit
+  --version, -v                   Print the version and exit
 
 Environment:
   ELVANTO_API_KEY                 Secret API key (Settings > Account Settings)
@@ -23,6 +56,9 @@ Environment:
   ELVANTO_VALIDATE                throw (default) | warn | off
   ELVANTO_MCP_PAGE_SIZE           Records per call when unspecified (default 25)
   ELVANTO_MCP_MAX_RESPONSE_CHARS  Response size cap (default 100000)
+  ELVANTO_MCP_TOKEN               Bearer token required by --http. Mandatory when
+                                  --host is not loopback, since an API key reads
+                                  every member and giving record in the account.
   ELVANTO_DEBUG                   on | verbose — log requests and timings to
                                   stderr. Credentials and returned records are
                                   never logged.
@@ -38,6 +74,11 @@ Example client configuration:
       }
     }
   }
+
+Example HTTP invocation, for a host that takes a URL:
+  ELVANTO_API_KEY=your-key ELVANTO_MCP_TOKEN=$(openssl rand -hex 32) \\
+    npx -y @criticalcodes/elvanto-mcp --http
+  # then point the host at http://127.0.0.1:${DEFAULT_HTTP_PORT}/ with that bearer token
 `
 
 /**
@@ -59,6 +100,17 @@ export function planStartup(
   }
   if (argv.includes('--help') || argv.includes('-h')) {
     return { action: 'print', text: HELP, exitCode: 0 }
+  }
+
+  let transport: TransportPlan
+  try {
+    transport = planTransport(argv, env)
+  } catch (error) {
+    return {
+      action: 'fail',
+      message: `${error instanceof Error ? error.message : String(error)}\nRun with --help to see the accepted options.`,
+      exitCode: 1,
+    }
   }
 
   let config: ServerConfig
@@ -85,6 +137,102 @@ export function planStartup(
         'Secret API Key.',
     )
   }
+  if (transport.kind === 'http' && transport.token === undefined) {
+    // Loopback only, or planTransport would have failed. Still worth saying out
+    // loud: anything running as this user can read the whole account through it,
+    // which is a wider door than a stdio server that dies with its client.
+    warnings.push(
+      'Serving HTTP without ELVANTO_MCP_TOKEN. Any process on this machine can ' +
+        'read every member and giving record in the account through this port. ' +
+        'Set ELVANTO_MCP_TOKEN to require a bearer token.',
+    )
+  }
 
-  return { action: 'serve', config, warnings }
+  return { action: 'serve', config, transport, warnings }
+}
+
+/**
+ * Reads the transport options.
+ *
+ * Throws rather than returning a plan, so {@link planStartup} can attribute the
+ * message uniformly; every throw here is an operator typo, which fails fast on
+ * the same reasoning as a malformed environment value.
+ */
+function planTransport(
+  argv: readonly string[],
+  env: Record<string, string | undefined>,
+): TransportPlan {
+  const http = argv.includes('--http')
+  const port = readOption(argv, '--port')
+  const host = readOption(argv, '--host')
+
+  if (!http) {
+    // Silently ignoring these would leave an operator staring at a stdio server
+    // wondering why nothing is listening on the port they asked for.
+    const stray = [port !== undefined ? '--port' : '', host !== undefined ? '--host' : '']
+      .filter(Boolean)
+      .join(' and ')
+    if (stray) {
+      throw new ElvantoError(
+        `${stray} only applies with --http, which was not passed. The server ` +
+          `would have spoken stdio and ignored it.`,
+      )
+    }
+    return { kind: 'stdio' }
+  }
+
+  let resolvedPort = DEFAULT_HTTP_PORT
+  if (port !== undefined) {
+    const parsed = Number(port)
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {
+      throw new ElvantoError(`--port must be an integer between 1 and 65535, got "${port}".`)
+    }
+    resolvedPort = parsed
+  }
+
+  const resolvedHost = host ?? DEFAULT_HTTP_HOST
+  const token = env['ELVANTO_MCP_TOKEN']?.trim()
+
+  if (!token && !isLoopback(resolvedHost)) {
+    throw new ElvantoError(
+      `Refusing to serve ${resolvedHost} without ELVANTO_MCP_TOKEN. An Elvanto API ` +
+        `key grants read access to every member record and every giving record in ` +
+        `the account, so an unauthenticated port on a reachable interface is a copy ` +
+        `of the church database. Either set ELVANTO_MCP_TOKEN, or drop --host to ` +
+        `bind ${DEFAULT_HTTP_HOST}.`,
+    )
+  }
+
+  return { kind: 'http', host: resolvedHost, port: resolvedPort, ...(token ? { token } : {}) }
+}
+
+/** Reads `--name value` or `--name=value`. */
+function readOption(argv: readonly string[], name: string): string | undefined {
+  const index = argv.indexOf(name)
+  if (index !== -1) {
+    const value = argv[index + 1]
+    if (value === undefined || value.startsWith('--')) {
+      throw new ElvantoError(`${name} requires a value.`)
+    }
+    return value
+  }
+
+  const inline = argv.find((arg) => arg.startsWith(`${name}=`))
+  return inline?.slice(name.length + 1)
+}
+
+/**
+ * Whether a bind address reaches only this machine.
+ *
+ * Errs towards "not loopback": an address this does not recognise requires a
+ * token, so a form nobody thought of fails closed.
+ */
+function isLoopback(host: string): boolean {
+  const bare = host.replace(/^\[|\]$/g, '').toLowerCase()
+  return (
+    bare === 'localhost' ||
+    bare === '::1' ||
+    bare === '0:0:0:0:0:0:0:1' ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare)
+  )
 }

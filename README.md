@@ -3,7 +3,7 @@
 [![CI](https://github.com/criticalcodes/elvanto/actions/workflows/ci.yml/badge.svg)](https://github.com/criticalcodes/elvanto/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Three things that share one source of truth, for the [Elvanto](https://www.elvanto.com)
+Four things that share one source of truth, for the [Elvanto](https://www.elvanto.com)
 church management API:
 
 | Package | What it is | Install |
@@ -11,6 +11,7 @@ church management API:
 | [`@criticalcodes/elvanto`](packages/elvanto) | Typed TypeScript/JavaScript client | `npm i @criticalcodes/elvanto` |
 | [`@criticalcodes/elvanto-cli`](packages/elvanto-cli) | Command-line interface | `npm install -g @criticalcodes/elvanto-cli` |
 | [`@criticalcodes/elvanto-mcp`](packages/elvanto-mcp) | MCP server, for LLM tools | `npx @criticalcodes/elvanto-mcp` |
+| [`@criticalcodes/elvanto-agent`](packages/elvanto-agent) | Agent toolkit for [Flue](https://flueframework.com) | `npm i @criticalcodes/elvanto-agent` |
 
 This version covers **API key authentication** and **read-only endpoints** — all
 25 of them. OAuth and mutations are designed for but not implemented; see
@@ -32,13 +33,16 @@ $ elvanto services get-all --fields songs --all
 $ elvanto people search --search lastname=Smith -o json
 ```
 
-## One registry, three surfaces
+## One registry, every surface
 
 Every endpoint is declared once, in
 [`packages/elvanto/src/registry.ts`](packages/elvanto/src/registry.ts): its path,
 its zod parameter schema, its response schema, and its documentation link. The
 SDK methods, the CLI commands and the MCP tools are all derived from it, so a
-parameter cannot exist on one surface and be missing from another.
+parameter cannot exist on one surface and be missing from another. The agent
+toolkit generates its tools from the same registry too — same names, same
+descriptions, same page and response caps — so a renamed endpoint is a compile
+error rather than a runtime surprise.
 
 Names are derived mechanically, so each surface reads idiomatically rather than
 leaking Elvanto's camelCase paths:
@@ -50,7 +54,8 @@ leaking Elvanto's camelCase paths:
 | MCP | snake_case | `elvanto_people_flows_steps_get_all` |
 
 Adding an endpoint means adding one registry entry and one binding line in
-`client.ts`. The CLI and MCP server pick it up with no further work.
+`client.ts`. The CLI, the MCP server and the agent's endpoint tools pick it up with
+no further work.
 
 ## Response normalization
 
@@ -206,11 +211,19 @@ everywhere, so those four remain documentation-only.
 
 ```console
 pnpm install
-pnpm build          # all three packages
+pnpm build          # all four packages
 pnpm typecheck      # includes compile-time type assertions
-pnpm test           # 273 tests, no network
+pnpm test           # 381 tests, no network
 pnpm test:coverage
 pnpm smoke          # live sweep, needs a real API key
+```
+
+The agent package additionally builds a deployable server, which is a separate
+step from the publishable toolkit and writes to `dist-app/` rather than `dist/`:
+
+```console
+pnpm --filter @criticalcodes/elvanto-agent build:app             # Cloudflare Worker
+FLUE_TARGET=node pnpm --filter @criticalcodes/elvanto-agent build:app   # Node server
 ```
 
 Developing here needs **Node 22.13+**, because pnpm 11 does. The published packages
@@ -235,19 +248,38 @@ MCP tests run against a local stub server and an in-memory MCP transport
 respectively, so they exercise real sockets and the real protocol.
 
 Both `pnpm test` and `pnpm typecheck` resolve `@criticalcodes/elvanto` to the
-SDK's **source**, not its build output — via an alias in `vitest.config.ts` and
-`paths` in the two consuming tsconfigs. Without that, a change to the SDK stays
-invisible to two thirds of the suite until someone runs `pnpm build`, and the
-tests pass against the previous build.
+SDK's **source**, not its build output — via aliases in `vitest.config.ts` and
+`paths` in the consuming tsconfigs. Without that, a change to the SDK stays
+invisible to most of the suite until someone runs `pnpm build`, and the
+tests pass against the previous build. `@criticalcodes/elvanto-mcp` is aliased the
+same way, since the agent package imports it.
+
+`packages/elvanto-agent/tsconfig.json` is the one package config that does **not**
+extend `tsconfig.base.json`: Flue's agent and app modules import each other with
+explicit `.ts` extensions, which needs bundler resolution. The base's strictness
+flags are repeated there rather than dropped.
 
 ## Using this from an agent
 
-Two routes, and the choice matters more than it looks.
+Three routes now, in increasing order of how much is done for you.
 
-**The MCP server**, for a general-purpose agent that should be able to reach
-anything. `@criticalcodes/elvanto-mcp` works today with any MCP-capable host — 25
+**The agent toolkit**, if you use [Flue](https://flueframework.com).
+`@criticalcodes/elvanto-agent` ships six tools that each answer a whole question —
+`find_person`, `roster`, `next_serving`, `service_brief`, `song_history`,
+`list_custom_fields` — plus all 25 raw endpoints as native tools, a
+`useElvantoBase()` hook that mounts them, and a one-binary runner that gives you a
+terminal chat, an HTTP server and a web chat UI from the same executable. Each
+purpose-built tool collapses a multi-call workflow into one small result, which
+matters because the raw endpoints are faithful to Elvanto and Elvanto's shapes are
+large.
+
+**The MCP server**, for a host that is somebody else's — Claude Desktop, a remote
+connector, another framework. (Not needed to give *your own* Flue agent the raw
+endpoints; the toolkit mounts those in-process.) `@criticalcodes/elvanto-mcp` works today with any MCP-capable host — 25
 read-only tools, schemas generated from the registry, a 25-record page default and
-a response cap so a large account can't flood a context window.
+a response cap so a large account can't flood a context window. It speaks stdio for
+desktop clients and streamable HTTP for hosts that only take a URL, which includes
+most agent frameworks.
 
 **The SDK directly**, for an agent with a specific job. Everything needed to
 generate tools is public, so a framework can enumerate the registry rather than
@@ -269,16 +301,35 @@ const tools = endpointIds.map((id) => {
 })
 ```
 
-Three things worth deciding up front:
+Four things worth deciding up front. The agent toolkit has made each of these
+decisions already, so they double as a description of what it does:
 
 - **Exposing fewer tools beats exposing all 25.** An agent that only needs rosters
   does not need the giving endpoints, and the narrowest surface is the easiest to
-  reason about.
+  reason about. The toolkit's default allowlist omits every financial endpoint.
 - **`validate: 'warn'` is usually right for an agent**, so an undocumented Elvanto
   field degrades the response instead of failing the session. Keep `throw` in tests.
 - **Cap what reaches the context.** The MCP server does this for you; direct SDK
   use does not — `fetchAll` on a large account will happily return 50,000 records.
-  Use `paginate` with `maxRecords`, or a small `page_size`.
+  Use `paginate` with `maxRecords`, or a small `page_size`. Say when you truncate:
+  a silently shortened list reads as a complete answer, and a model will present it
+  as one.
+- **Build the client lazily.** A framework that constructs it while composing the
+  agent turns a missing API key into an internal error before the agent exists,
+  instead of a message the model can relay.
+
+### If you are building on this for your own church
+
+The toolkit is deliberately generic — it takes configuration and has no policy of
+its own. Anything specific to an account (which custom fields carry your
+safe-ministry credentials, renewal windows, notice wording, who gets chased) belongs
+in a repository you control, not in a public package. `useElvantoBase()` is a
+composition hook, so your agent mounts the shared tools and then its own:
+
+```ts
+useElvantoBase()
+for (const tool of myCredentialTools(profile)) useTool(tool)
+```
 
 ## Roadmap
 
@@ -292,6 +343,14 @@ Deliberately not in this version:
   registry has no `method` field yet because every endpoint here is a POST that
   reads; adding writes should also add an explicit opt-in, so an MCP server
   cannot be handed the ability to delete a person by accident.
+- **Anything outbound from the agent.** The toolkit reads and reports; it sends no
+  email or SMS. Notifying people is a mutation of the world rather than of Elvanto,
+  and it should be an explicit, separately-authorised step rather than something a
+  model can decide to do.
+- **`song_history` against real data.** It reads the `songs` sub-structure of a
+  service, which came back empty on every service in the live sweep — so its shape
+  still rests on Elvanto's documentation. An empty result may mean the shape is
+  wrong rather than that nothing was sung; the tool says so rather than asserting.
 
 ## Notes on the API itself
 

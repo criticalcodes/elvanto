@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The only package here that doesn't extend ../../tsconfig.base.json. The base
+  // sets NodeNext resolution and `.js` specifiers; Flue's agent and app modules
+  // import each other with explicit `.ts` extensions, which needs
+  // `allowImportingTsExtensions` and a bundler resolver. Reconciling the two
+  // would mean writing this package's imports in a style Flue's own tooling and
+  // documentation don't use. The strictness flags from the base are repeated
+  // below instead, so nothing is quietly relaxed.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "types": ["node"],
+
+    "allowImportingTsExtensions": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": false,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+
+    // Resolve the sibling packages to their sources, matching the alias in
+    // vitest.config.ts and the other packages' tsconfigs. Without this,
+    // `pnpm typecheck` silently depends on a prior `pnpm build` and reports
+    // stale or missing types. Typechecking only — Node resolves the real
+    // packages at runtime.
+    "paths": {
+      "@criticalcodes/elvanto": ["../elvanto/src/index.ts"],
+      "@criticalcodes/elvanto-mcp": ["../elvanto-mcp/src/lib.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

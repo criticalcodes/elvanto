@@ -3,5 +3,16 @@ packages:
 allowBuilds:
   # Required by tsup and vitest, which bundle via esbuild.
   esbuild: true
+  # The Workers runtime. wrangler and the Cloudflare Vite plugin need its
+  # postinstall to fetch the platform binary, so without this `vite dev` and
+  # `deploy` fail in packages/elvanto-agent.
+  workerd: true
+  # Pulled in transitively by Flue's model providers. None of their install
+  # scripts are needed to import them — core-js-pure's prints a funding notice,
+  # and the other two generate optional codegen for paths we do not use — so they
+  # stay off rather than running arbitrary scripts for no benefit.
+  '@google/genai': false
+  core-js-pure: false
+  protobufjs: false
 minimumReleaseAgeExclude:
   - tsx@4.23.7

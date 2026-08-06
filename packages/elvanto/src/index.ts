@@ -89,6 +89,16 @@ export {
 } from './json-schema.js'
 
 export {
+  DEFAULT_MAX_RESPONSE_CHARS,
+  DEFAULT_PAGE_SIZE,
+  MIN_MAX_RESPONSE_CHARS,
+  endpointToolDescription,
+  fitToBudget,
+  toModelPayload,
+  withDefaultPageSize,
+} from './model-tools.js'
+
+export {
   toCliPath,
   toKebabCase,
   toMcpToolName,

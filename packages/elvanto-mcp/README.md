@@ -27,6 +27,48 @@ Your key is in Elvanto under **Settings → Account Settings → Secret API Key*
 
 Requires Node 20+.
 
+## Transports
+
+**stdio** is the default, and is what a desktop MCP client launches.
+
+**Streamable HTTP** is for hosts that take a URL and cannot spawn a subprocess —
+which includes most agent frameworks. Same 25 tools, same behaviour:
+
+```console
+$ ELVANTO_API_KEY=your-key ELVANTO_MCP_TOKEN=$(openssl rand -hex 32) \
+    npx -y @criticalcodes/elvanto-mcp --http
+[elvanto-mcp] Listening on http://127.0.0.1:3001/ (bearer token required)
+```
+
+Point the host at `http://127.0.0.1:3001/` with that token as
+`Authorization: Bearer …`. `--port` and `--host` change where it binds.
+
+The HTTP mode is **stateless** — no sessions, one server per request — so it also
+runs behind a load balancer, or on a runtime with no process between requests.
+
+Two guardrails, because this port answers with member and giving data:
+
+- It **binds `127.0.0.1` by default**. Serving a reachable interface requires
+  `ELVANTO_MCP_TOKEN`; without one, `--host 0.0.0.0` refuses to start rather than
+  publishing the account to the local network.
+- On loopback with no token it warns, because any process on the machine can then
+  read the whole account through it.
+
+### Mounting it in your own application
+
+The server is also importable, so an application that already has an HTTP surface
+can mount it instead of running a second process. The handler is a plain
+`Request → Response` function with no Node dependencies, so it works on Workers
+and Deno as well as Node:
+
+```ts
+import { configFromEnv, createHttpHandler } from '@criticalcodes/elvanto-mcp'
+
+const handler = createHttpHandler(configFromEnv(), { token: process.env.ELVANTO_MCP_TOKEN })
+
+app.all('/mcp', (c) => handler(c.req.raw))
+```
+
 ## Tools
 
 25 tools, one per read-only endpoint, named in snake_case:
@@ -103,6 +145,7 @@ is the model's to correct; a bad API key is not:
 | `ELVANTO_VALIDATE` | `throw` | `throw`, `warn`, or `off`. See below. |
 | `ELVANTO_MCP_PAGE_SIZE` | `25` | Records per call when unspecified. |
 | `ELVANTO_MCP_MAX_RESPONSE_CHARS` | `100000` | Response size cap. |
+| `ELVANTO_MCP_TOKEN` | — | Bearer token required by `--http`. Mandatory for a non-loopback bind. |
 | `ELVANTO_DEBUG` | off | `on` or `verbose` — log to stderr. |
 | `ELVANTO_BASE_URL` | Elvanto's API | Override the API root. |
 

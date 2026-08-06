@@ -16,6 +16,13 @@ import {
   getEndpoint,
   isPageEndpoint,
   paramsJsonSchema,
+  endpointToolDescription,
+  fitToBudget as fitPayloadToBudget,
+  toModelPayload,
+  withDefaultPageSize,
+  DEFAULT_PAGE_SIZE as SHARED_DEFAULT_PAGE_SIZE,
+  DEFAULT_MAX_RESPONSE_CHARS as SHARED_MAX_RESPONSE_CHARS,
+  MIN_MAX_RESPONSE_CHARS as SHARED_MIN_RESPONSE_CHARS,
   parseDebugMode,
   parseValidationMode,
   toMcpToolName,
@@ -29,22 +36,16 @@ export const SERVER_NAME = 'elvanto'
 export const SERVER_VERSION = '0.1.0'
 
 /**
- * Default records per page for tool calls that don't specify one.
+ * Response and paging limits, re-exported from the SDK.
  *
- * Elvanto's own default is 1000, which would flood a model's context on a
- * mid-sized account. Callers can still ask for more explicitly, up to Elvanto's
- * limit of 1000.
+ * They live there because the agent toolkit needs exactly the same numbers and
+ * the same truncation behaviour — a model that sees a 25-record page on one
+ * surface and a 1000-record page on another is being told two different things
+ * about the same API.
  */
-export const DEFAULT_PAGE_SIZE = 25
-
-/** Hard cap on the characters returned by one tool call. */
-export const DEFAULT_MAX_RESPONSE_CHARS = 100_000
-
-/**
- * Floor for the response cap. Below this there is no room for the truncation
- * notice itself, so the cap could not be honoured while still explaining why.
- */
-export const MIN_MAX_RESPONSE_CHARS = 1_000
+export const DEFAULT_PAGE_SIZE = SHARED_DEFAULT_PAGE_SIZE
+export const DEFAULT_MAX_RESPONSE_CHARS = SHARED_MAX_RESPONSE_CHARS
+export const MIN_MAX_RESPONSE_CHARS = SHARED_MIN_RESPONSE_CHARS
 
 export interface ServerConfig {
   clientOptions?: ElvantoClientOptions
@@ -122,32 +123,15 @@ export function buildTools(defaultPageSize = DEFAULT_PAGE_SIZE): Tool[] {
   })
 }
 
-/** Exported for unit testing against synthetic endpoints. */
+/**
+ * Kept as a named export because this package's tests and consumers use it;
+ * the text itself is the SDK's, so both surfaces describe an endpoint alike.
+ */
 export function toolDescription(
   endpoint: EndpointDefinition,
   defaultPageSize: number,
 ): string {
-  const parts = [endpoint.summary]
-  if (endpoint.notes) parts.push(endpoint.notes)
-
-  if (isPageEndpoint(endpoint) && 'page_size' in endpoint.params.shape) {
-    parts.push(
-      `Returns up to ${defaultPageSize} records per call unless page_size is ` +
-        `given. The result includes total and has_more — increase page or ` +
-        `page_size to see the rest.`,
-    )
-  }
-  if (endpoint.auth === 'oauth-only') {
-    parts.push('Requires OAuth; unavailable when the server is configured with an API key.')
-  }
-  if (endpoint.verified !== 'live') {
-    parts.push(
-      "Note: this endpoint's response shape follows Elvanto's documentation but " +
-        'has not been verified against real data, so it may differ.',
-    )
-  }
-  parts.push(`Docs: ${endpoint.docs}`)
-  return parts.join(' ')
+  return endpointToolDescription(endpoint, defaultPageSize)
 }
 
 /**
@@ -193,14 +177,11 @@ export function createServer(config: ServerConfig = {}): Server {
       )
     }
 
-    const args: Record<string, unknown> = { ...(request.params.arguments ?? {}) }
-    if (
-      isPageEndpoint(endpoint) &&
-      'page_size' in endpoint.params.shape &&
-      args['page_size'] === undefined
-    ) {
-      args['page_size'] = defaultPageSize
-    }
+    const args = withDefaultPageSize(
+      endpoint,
+      { ...(request.params.arguments ?? {}) },
+      defaultPageSize,
+    )
 
     try {
       const result = await getClient().call(endpoint.id as never, args as never)
@@ -213,144 +194,17 @@ export function createServer(config: ServerConfig = {}): Server {
   return server
 }
 
-/**
- * Serialises a result for the model.
- *
- * Page results are rewritten into snake_case keys matching Elvanto's own
- * vocabulary, so a model reading the tool description sees the same names in the
- * response.
- */
+/** Serialises a result for the model, within the configured budget. */
 function okResult(result: unknown, maxChars: number): CallToolResult {
-  const payload = isPageResult(result)
-    ? {
-        total: result.total,
-        page: result.page,
-        per_page: result.perPage,
-        returned: result.items.length,
-        has_more: result.hasMore,
-        items: result.items,
-      }
-    : result
-
-  return { content: [{ type: 'text', text: fitToBudget(payload, maxChars) }] }
+  return { content: [{ type: 'text', text: fitToBudget(result, maxChars) }] }
 }
-
-interface PageResult {
-  items: unknown[]
-  page: number
-  perPage: number
-  total: number
-  hasMore: boolean
-}
-
-function isPageResult(value: unknown): value is PageResult {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    Array.isArray((value as { items?: unknown }).items) &&
-    typeof (value as { total?: unknown }).total === 'number'
-  )
-}
-
-const serialize = (value: unknown): string => JSON.stringify(value, null, 2)
 
 /**
- * Serialises a payload within a character budget, saying what it dropped.
- *
- * Every candidate is measured after serialisation rather than estimated, because
- * an estimate has to guess the indentation depth each record will end up at and
- * the size of the truncation notice itself — get either wrong and the "cap" is
- * exceeded. Silent truncation is the real hazard here: a short result reads as a
- * complete one, so the notice is part of the budget, not an afterthought.
+ * Re-exported for this package's tests, which assert the truncation contract
+ * directly. The implementation is shared with the agent toolkit.
  */
 export function fitToBudget(payload: unknown, maxChars: number): string {
-  const full = serialize(payload)
-  if (full.length <= maxChars) return full
-
-  if (isPageResult(payload)) return fitPage(payload, maxChars)
-  return fitRecord(payload, maxChars)
-}
-
-/** Drops whole records from the end of a page until it fits. */
-function fitPage(page: PageResult, maxChars: number): string {
-  const rest = { ...page } as Record<string, unknown>
-  delete rest['items']
-
-  const build = (items: unknown[], dropped: number) =>
-    serialize({
-      ...rest,
-      items,
-      truncated: {
-        dropped_records: dropped,
-        returned: items.length,
-        reason: `Response exceeded ${maxChars} characters.`,
-        advice:
-          'Request a smaller page_size, or narrow the query with the available filters.',
-      },
-    })
-
-  let kept = page.items.length
-  while (kept > 0) {
-    const text = build(page.items.slice(0, kept), page.items.length - kept)
-    if (text.length <= maxChars) return text
-
-    // Shrink by the overflow divided by the average record size, so a wildly
-    // oversized response converges in a few iterations rather than one drop each.
-    const perRecord = Math.max(1, Math.floor(text.length / kept))
-    kept -= Math.max(1, Math.ceil((text.length - maxChars) / perRecord))
-  }
-  return build([], page.items.length)
-}
-
-/**
- * Drops the largest fields of a single record until it fits.
- *
- * The previous approach sliced the serialised JSON, which cut mid-string and
- * handed the model text that `JSON.parse` rejects. Dropping whole fields keeps
- * the result parseable, and drops biggest-first so a huge `lyrics` or
- * `chord_chart` goes before anything small and identifying.
- */
-function fitRecord(payload: unknown, maxChars: number): string {
-  if (!payload || typeof payload !== 'object') {
-    return serialize({
-      truncated: {
-        reason: `Response exceeded ${maxChars} characters.`,
-        advice: 'Request fewer fields.',
-      },
-    })
-  }
-
-  const entries = Object.entries(payload as Record<string, unknown>).sort(
-    (a, b) => serialize(b[1]).length - serialize(a[1]).length,
-  )
-  const dropped: string[] = []
-  let kept = entries
-
-  while (kept.length > 0) {
-    const candidate = serialize({
-      ...Object.fromEntries(kept),
-      truncated: {
-        dropped_fields: dropped,
-        reason: `Response exceeded ${maxChars} characters.`,
-        advice:
-          'Request the dropped fields individually, or use the `fields` parameter to ask for less.',
-      },
-    })
-    if (candidate.length <= maxChars) return candidate
-
-    // Largest first, so identifying fields such as `id` survive longest.
-    const [name] = kept[0]!
-    dropped.push(name)
-    kept = kept.slice(1)
-  }
-
-  return serialize({
-    truncated: {
-      dropped_fields: dropped,
-      reason: `Response exceeded ${maxChars} characters.`,
-      advice: 'Raise ELVANTO_MCP_MAX_RESPONSE_CHARS, or request fewer fields.',
-    },
-  })
+  return fitPayloadToBudget(toModelPayload(payload), maxChars)
 }
 
 function errorResult(message: string): CallToolResult {

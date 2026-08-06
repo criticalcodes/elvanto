@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# The agent package's deployable server build, kept apart from the publishable
+# `dist` so an app build cannot replace the toolkit that gets published.
+dist-app/
 *.tsbuildinfo
 # Nothing in this repo reads a .env — credentials are passed per invocation. These
 # stay ignored anyway, so a stray one can never be committed by accident.
@@ -12,3 +15,5 @@ coverage/
 *.tgz
 # Sweep output: contains redacted but still account-specific structure.
 report*.json
+# Wrangler's local state for the agent package.
+.wrangler/

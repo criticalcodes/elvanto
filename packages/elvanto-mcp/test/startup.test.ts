@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { HELP, planStartup } from '../src/startup.js'
+import {
+  DEFAULT_HTTP_HOST,
+  DEFAULT_HTTP_PORT,
+  HELP,
+  planStartup,
+} from '../src/startup.js'
 import { SERVER_VERSION } from '../src/server.js'
 
 const withKey = { ELVANTO_API_KEY: 'k' }
@@ -91,6 +96,114 @@ describe('planStartup', () => {
       expect(plan.action).toBe('serve')
       if (plan.action !== 'serve') return
       expect(plan.config.defaultPageSize).toBeUndefined()
+    })
+  })
+
+  describe('transport selection', () => {
+    test('defaults to stdio', () => {
+      const plan = planStartup([], withKey)
+      if (plan.action !== 'serve') throw new Error('expected serve')
+      expect(plan.transport).toEqual({ kind: 'stdio' })
+    })
+
+    test('--http binds loopback on the default port', () => {
+      const plan = planStartup(['--http'], withKey)
+      if (plan.action !== 'serve') throw new Error('expected serve')
+      expect(plan.transport).toEqual({
+        kind: 'http',
+        host: DEFAULT_HTTP_HOST,
+        port: DEFAULT_HTTP_PORT,
+      })
+    })
+
+    test('reads the token from the environment', () => {
+      const plan = planStartup(['--http'], { ...withKey, ELVANTO_MCP_TOKEN: 'sekret' })
+      if (plan.action !== 'serve') throw new Error('expected serve')
+      expect(plan.transport).toMatchObject({ kind: 'http', token: 'sekret' })
+      expect(plan.warnings).toEqual([])
+    })
+
+    test('accepts --port and --host in both spellings', () => {
+      for (const argv of [
+        ['--http', '--port', '9000', '--host', '127.0.0.5'],
+        ['--http', '--port=9000', '--host=127.0.0.5'],
+      ]) {
+        const plan = planStartup(argv, withKey)
+        if (plan.action !== 'serve') throw new Error(`expected serve for ${argv.join(' ')}`)
+        expect(plan.transport).toMatchObject({ port: 9000, host: '127.0.0.5' })
+      }
+    })
+
+    test('warns when serving loopback with no token', () => {
+      const plan = planStartup(['--http'], withKey)
+      if (plan.action !== 'serve') throw new Error('expected serve')
+      expect(plan.warnings).toHaveLength(1)
+      expect(plan.warnings[0]).toContain('ELVANTO_MCP_TOKEN')
+    })
+
+    test('refuses a reachable interface with no token', () => {
+      // The failure mode this guards against is publishing every member and
+      // giving record to the local network by typing one flag.
+      for (const host of ['0.0.0.0', '::', '192.168.1.10', 'example.local']) {
+        const plan = planStartup(['--http', '--host', host], withKey)
+        expect(plan.action, host).toBe('fail')
+        if (plan.action !== 'fail') continue
+        expect(plan.message).toContain('ELVANTO_MCP_TOKEN')
+      }
+    })
+
+    test('allows a reachable interface once a token is set', () => {
+      const plan = planStartup(['--http', '--host', '0.0.0.0'], {
+        ...withKey,
+        ELVANTO_MCP_TOKEN: 'sekret',
+      })
+      expect(plan.action).toBe('serve')
+    })
+
+    test('treats every loopback spelling as loopback', () => {
+      for (const host of ['localhost', '127.0.0.1', '127.0.1.1', '::1', '[::1]']) {
+        const plan = planStartup(['--http', '--host', host], withKey)
+        expect(plan.action, host).toBe('serve')
+      }
+    })
+
+    test('a blank token is no token', () => {
+      // Otherwise `ELVANTO_MCP_TOKEN=` in a compose file would read as
+      // authentication while accepting `Bearer `.
+      const plan = planStartup(['--http', '--host', '0.0.0.0'], {
+        ...withKey,
+        ELVANTO_MCP_TOKEN: '   ',
+      })
+      expect(plan.action).toBe('fail')
+    })
+
+    test('rejects a nonsense port rather than falling back to the default', () => {
+      for (const port of ['nope', '0', '-1', '70000', '80.5']) {
+        const plan = planStartup(['--http', '--port', port], withKey)
+        expect(plan.action, port).toBe('fail')
+        if (plan.action !== 'fail') continue
+        expect(plan.message).toContain('--port')
+      }
+    })
+
+    test('rejects an option with no value', () => {
+      const plan = planStartup(['--http', '--port'], withKey)
+      expect(plan.action).toBe('fail')
+    })
+
+    test('rejects --port and --host without --http', () => {
+      // Silently ignoring them would leave an operator watching a port that
+      // nothing ever bound.
+      for (const argv of [['--port', '9000'], ['--host', '0.0.0.0']]) {
+        const plan = planStartup(argv, withKey)
+        expect(plan.action, argv.join(' ')).toBe('fail')
+        if (plan.action !== 'fail') continue
+        expect(plan.message).toContain('--http')
+      }
+    })
+
+    test('help still wins over a broken transport option', () => {
+      expect(planStartup(['--help', '--port', 'nope'], {}).action).toBe('print')
     })
   })
 
