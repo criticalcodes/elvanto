@@ -27,6 +27,11 @@
 
 export { useElvantoBase, baseInstruction, type ElvantoBaseOptions } from './base.ts'
 
+// The HTTP surface, for `src/app.ts`. Flue's own build turns that into a Node
+// server or a Worker, so this package ships no server of its own.
+export { elvantoRoutes, agentIdentity, type ElvantoRoutesOptions } from './routes.ts'
+export { webChatPage, type WebChatOptions } from './cli/web.ts'
+
 export {
   ALL_ENDPOINTS,
   CORE_ENDPOINTS,

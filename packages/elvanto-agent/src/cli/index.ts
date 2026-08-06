@@ -1,23 +1,22 @@
-import { createAgentRouter } from '@flue/runtime/routing'
-import { init, type Agent } from '@flue/runtime'
+import { type Agent } from '@flue/runtime'
 import { sqlite, start } from '@flue/runtime/node'
-import { Hono } from 'hono'
 import { stderr, stdout } from 'node:process'
 import { ask, askOnce, chatLoop } from './chat.ts'
 import { webChatPage } from './web.ts'
 
 /**
- * One executable that runs an agent three ways.
+ * A terminal front end for an agent.
  *
- * The thing that makes this possible is `start({ agents })`, which boots the Flue
- * runtime in the current process with no server, no `app.ts`, and no `'use agent'`
- * scan — the agent function *is* the agent, identified by its name. So a CLI needs
- * neither Vite nor Wrangler, and the same binary can open a terminal chat, serve
- * HTTP, or run a one-shot job.
+ * Deliberately narrow: it covers only what Flue does not already provide. Flue has
+ * no interactive chat, so that is here. Flue *does* build a server — `vite build`
+ * emits `dist/server.mjs` for Node and a Worker for Cloudflare from `src/app.ts` —
+ * so this does not serve HTTP. An earlier version did, reproducing the build with
+ * an extra dependency and working only on Node; mount `elvantoRoutes()` in
+ * `app.ts` instead.
  *
- * The Cloudflare target still builds through Vite, because Durable Object codegen
- * requires it — but it imports the same agent module, so there is one behaviour
- * across all three.
+ * `start({ agents })` is what makes the terminal path work without a build: it
+ * boots the runtime in the current process with no server and no `'use agent'`
+ * scan — the agent function *is* the agent, identified by its name.
  *
  * Nothing here is specific to any church or account: a caller supplies its agent
  * and its name. Policy belongs in the project that owns the agent.
@@ -30,8 +29,6 @@ export interface ElvantoCliOptions {
   name: string
   /** One-line description for `--help`. */
   description?: string
-  /** Title shown in the web chat header. Defaults to `name`. */
-  title?: string
   /**
    * Where conversations are stored.
    *
@@ -40,6 +37,17 @@ export interface ElvantoCliOptions {
    * makes `--id` meaningless. Pass `false` for that in-memory behaviour.
    */
   db?: string | false
+  /**
+   * A dotenv file to load before starting, relative to the working directory.
+   * Defaults to `.env`; `false` skips it.
+   *
+   * Loading it is not optional politeness — `flue run` and `vite dev` both read
+   * `.env`, so a project whose keys live there works under those and would fail
+   * under a hand-rolled entry that skipped it. Real environment variables win over
+   * the file, which is what `process.loadEnvFile` does and what a deployment
+   * expects.
+   */
+  envFile?: string | false
   /** Extra subcommands, e.g. a scheduled job worth running by hand. */
   commands?: Record<string, ElvantoCliCommand>
 }
@@ -99,13 +107,17 @@ export async function runElvantoCli(
 ): Promise<void> {
   silenceSqliteWarning()
   const args = parseArgs(argv)
-  const title = options.title ?? options.name
+
+  // `--env` wins over the option, which wins over the default, matching
+  // `flue run --env`.
+  const envFile = flagString(args, 'env') ?? (options.envFile === false ? null : (options.envFile ?? '.env'))
+  if (envFile) loadEnvFile(envFile)
 
   // Only a recognised word is a command; anything else is the question itself.
   // Without this, `elvanto "who is serving?"` reads its first word as a command
   // name and prints help — which is precisely the friction a bare-message CLI is
   // supposed to remove.
-  const BUILTIN = new Set(['serve', 'chat', 'help'])
+  const BUILTIN = new Set(['chat', 'help'])
   const first = args.positional[0]
   const isCommand =
     first !== undefined && (BUILTIN.has(first) || first in (options.commands ?? {}))
@@ -131,10 +143,6 @@ export async function runElvantoCli(
 
   try {
     switch (command) {
-      case 'serve':
-        await serve(options, args, title)
-        return
-
       case undefined:
       case 'chat': {
         const id = flagString(args, 'id') ?? 'cli'
@@ -143,8 +151,16 @@ export async function runElvantoCli(
         // A piped or argument-supplied message is a one-shot; an interactive
         // terminal gets the loop. Checking isTTY means `echo … | elvanto chat`
         // behaves like a unix tool rather than hanging on a prompt.
+        const json = args.flags['json'] === true
+
         if (message) {
-          await askOnce({ agent: options.agent, id, message, name: options.name })
+          await askOnce({
+            agent: options.agent,
+            id,
+            message,
+            name: options.name,
+            json,
+          })
         } else if (process.stdin.isTTY) {
           await chatLoop({ agent: options.agent, id, name: options.name })
         } else {
@@ -154,7 +170,13 @@ export async function runElvantoCli(
             process.exitCode = 1
             return
           }
-          await askOnce({ agent: options.agent, id, message: piped.trim(), name: options.name })
+          await askOnce({
+            agent: options.agent,
+            id,
+            message: piped.trim(),
+            name: options.name,
+            json,
+          })
         }
         return
       }
@@ -175,72 +197,110 @@ export async function runElvantoCli(
   } catch (error) {
     // The message, not a stack: a failed run is usually a missing key or a bad
     // question, and a stack buries both.
-    stderr.write(`${options.name}: ${error instanceof Error ? error.message : String(error)}\n`)
-    process.exitCode = 1
-  }
-}
+    const detail = describe(error)
+    const aborted = /abort/i.test(detail)
 
-/**
- * Serves the agent's HTTP surface and the web chat.
- *
- * `@hono/node-server` rather than a hand-rolled `node:http` adapter, because the
- * agent router's streaming routes need proper request/response bridging and this is
- * the adapter Flue's own Node target uses.
- */
-async function serve(options: ElvantoCliOptions, args: Args, title: string): Promise<void> {
-  const { serve: honoServe } = await import('@hono/node-server')
-
-  const port = Number(flagString(args, 'port') ?? process.env['PORT'] ?? 8787)
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error(`--port must be an integer between 1 and 65535.`)
-  }
-  const host = flagString(args, 'host') ?? '127.0.0.1'
-
-  const app = buildApp(options, title)
-
-  await new Promise<void>((resolve) => {
-    honoServe({ fetch: app.fetch, port, hostname: host }, (info) => {
-      stderr.write(
-        `${options.name} listening on http://${host}:${info.port}/ ` +
-          `(chat UI at /, API at /agents/${identityOf(options.agent)})\n`,
+    if (args.flags['json'] === true) {
+      // One envelope for every terminal result, as `flue run --json` promises —
+      // a script must not have to parse stderr to learn what happened.
+      stdout.write(
+        `${JSON.stringify({
+          id: flagString(args, 'id') ?? 'cli',
+          agent: options.name,
+          outcome: aborted ? 'aborted' : 'failed',
+          error: { message: detail },
+        })}\n`,
       )
-      resolve()
-    })
-  })
-
-  // Hold the process open until signalled.
-  await new Promise<void>((resolve) => {
-    const stop = () => resolve()
-    process.once('SIGINT', stop)
-    process.once('SIGTERM', stop)
-  })
-}
-
-/** The Hono app: the agent's routes, plus the chat page. Exported for tests. */
-export function buildApp(options: ElvantoCliOptions, title = options.name): Hono {
-  const app = new Hono()
-  const identity = identityOf(options.agent)
-  const mount = `/agents/${identity}`
-
-  app.route(mount, createAgentRouter(options.agent))
-
-  app.get('/', (c) => {
-    const conversationId = c.req.query('id') ?? 'web'
-    return c.html(webChatPage({ mount, title, conversationId }))
-  })
-
-  return app
+    } else {
+      stderr.write(`${options.name}: ${explain(detail, options)}\n`)
+    }
+    // 130 for an abort, matching `flue run` and the shell convention for SIGINT.
+    process.exitCode = aborted ? 130 : 1
+  }
 }
 
 /**
- * The agent's durable identity — its `agentName` static, else the function name.
+ * Flattens an error into every message it carries.
  *
- * The same rule `start()` applies, so the mount path matches the conversation
- * storage key rather than drifting from it.
+ * The reason a run failed is rarely on the top-level error: Flue wraps it, so
+ * `AgentRunError.message` is "Agent run failed (submission …)" and the actual cause
+ * — "Provider is not configured: anthropic" — sits on a nested error or on
+ * `meta.reason`. Reading only the outer message loses the one useful sentence, so
+ * this gathers all of them and lets {@link explain} match against the lot.
+ *
+ * Deliberately tolerant of shape rather than typed against Flue's error classes:
+ * the nesting is an implementation detail, and a version that rearranges it should
+ * degrade to a worse message, not to a wrong one.
  */
-function identityOf(agent: Agent): string {
-  const named = agent as { agentName?: string; name?: string }
-  return (named.agentName ?? named.name ?? 'agent').toLowerCase()
+function describe(error: unknown): string {
+  const seen = new Set<unknown>()
+  const parts: string[] = []
+
+  const walk = (value: unknown, depth: number): void => {
+    if (depth > 5 || value === null || typeof value !== 'object' || seen.has(value)) return
+    seen.add(value)
+
+    const record = value as { message?: unknown; meta?: unknown; cause?: unknown }
+    if (typeof record.message === 'string') parts.push(record.message)
+    const meta = record.meta as { reason?: unknown } | undefined
+    if (meta && typeof meta.reason === 'string') parts.push(meta.reason)
+    walk(record.cause, depth + 1)
+  }
+
+  if (typeof error === 'string') return error
+  walk(error, 0)
+  return parts.length > 0 ? [...new Set(parts)].join(' — ') : String(error)
+}
+
+/**
+ * Turns a runtime failure into something actionable.
+ *
+ * "Provider is not configured: anthropic" is accurate and tells you nothing about
+ * what to do — and it arrives wrapped in a page of Flue's own stack, so the useful
+ * sentence has to be worth finding.
+ */
+function explain(message: string, options: ElvantoCliOptions): string {
+  const provider = /Provider is not configured: (\S+)/.exec(message)?.[1]
+  if (!provider) return message
+
+  const variable = PROVIDER_ENV[provider] ?? `${provider.toUpperCase()}_API_KEY`
+  const file = options.envFile === false ? null : (options.envFile ?? '.env')
+
+  return (
+    `no API key for the "${provider}" model provider.\n\n` +
+    `  Set ${variable}${file ? ` in ${file}, or in the environment` : ' in the environment'}:\n` +
+    `      ${variable}=…\n\n` +
+    `  The model is chosen by useModel() in the agent, so if you meant to use a ` +
+    `different\n  provider, change it there instead.`
+  )
+}
+
+/** The env var each provider reads. Anything unlisted follows the same convention. */
+const PROVIDER_ENV: Record<string, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  google: 'GEMINI_API_KEY',
+  groq: 'GROQ_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
+  moonshot: 'MOONSHOT_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  xai: 'XAI_API_KEY',
+}
+
+/**
+ * Loads a dotenv file if it is there.
+ *
+ * `process.loadEnvFile` throws when the file is absent, which is a normal state —
+ * a deployment supplies real environment variables and has no `.env` at all. It
+ * also leaves already-set variables alone, so the environment beats the file.
+ */
+function loadEnvFile(path: string): void {
+  try {
+    process.loadEnvFile(path)
+  } catch {
+    // Absent, unreadable, or a Node without the API. Any real missing value shows
+    // up as a specific error later, with better advice than this could give.
+  }
 }
 
 /**
@@ -269,7 +329,6 @@ async function readStdin(): Promise<string> {
 function help(options: ElvantoCliOptions): string {
   const lines = [
     [`${options.name} [chat] [message…]`, 'Ask one question, or open an interactive chat'],
-    [`${options.name} serve`, 'Serve the HTTP API and a web chat UI'],
     ...Object.entries(options.commands ?? {}).map(
       ([name, command]) => [`${options.name} ${name}`, command.describe] as const,
     ),
@@ -285,14 +344,19 @@ Usage:
 ${usage.join('\n')}
 
 Options:
-  --id <id>            Conversation to continue. Default "cli".
-  --port <n>           serve only. Default 8787, or $PORT.
-  --host <address>     serve only. Default 127.0.0.1.
+  --id <id>            Conversation to create or continue. Default "cli".
+  --json               Print one JSON result envelope instead of the reply.
+  --env <path>         Load this .env-format file instead of ./.env.
   --help               This.
 
 Conversations persist between runs, so reusing --id continues one. Reads
 credentials from the environment (or .env): ELVANTO_API_KEY, and a model
 provider key such as ANTHROPIC_API_KEY.
+
+To serve HTTP and the web chat UI, build the app instead — Flue emits the
+server, so there is nothing to run by hand here:
+  vite build && node dist/server.mjs        # Node
+  vite build && wrangler deploy             # Cloudflare
 `
 }
 

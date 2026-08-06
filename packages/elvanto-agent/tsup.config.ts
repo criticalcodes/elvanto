@@ -5,15 +5,15 @@ import { defineConfig } from 'tsup'
  *
  * `index` is the toolkit — tools, hooks, shaping — and must stay importable on
  * Cloudflare Workers, so it may not reach anything Node-only. `cli` is the
- * single-binary runner, which imports `@flue/runtime/node`, `@hono/node-server`
- * and `node:readline`. Bundling them together would drag `node:http` into every
- * Worker build that imported a tool.
+ * terminal runner, which imports `@flue/runtime/node` and `node:readline`.
+ * Bundling them together would drag Node-only modules into every Worker build
+ * that imported a tool. `routes` sits with `index` — it is web-standard Hono.
  *
- * `vite build` produces the deployable server separately, into `dist-app` — see
- * vite.config.ts.
+ * There is no server entry: `vite build` emits the deployable server from
+ * `src/app.ts`, for Node and for Cloudflare alike.
  */
 export default defineConfig({
-  entry: ['src/index.ts', 'src/cli/index.ts'],
+  entry: ['src/index.ts', 'src/cli/index.ts', 'src/routes.ts'],
   format: ['esm'],
   dts: true,
   clean: true,

@@ -26,6 +26,10 @@
     "./cli": {
       "types": "./dist/cli/index.d.ts",
       "default": "./dist/cli/index.js"
+    },
+    "./routes": {
+      "types": "./dist/routes.d.ts",
+      "default": "./dist/routes.js"
     }
   },
   "files": [
@@ -54,7 +58,6 @@
   },
   "dependencies": {
     "@criticalcodes/elvanto": "workspace:*",
-    "@hono/node-server": "^2.0.3",
     "valibot": "^1.1.0"
   },
   "peerDependencies": {

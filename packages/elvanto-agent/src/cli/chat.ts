@@ -32,24 +32,60 @@ export interface ChatOptions {
   name?: string
 }
 
+export interface Exchange {
+  text: string
+  submissionId: string
+  uid?: string
+}
+
 /**
- * Runs one exchange and returns the reply text.
+ * Runs one exchange.
  *
  * Shared by the interactive loop and the one-shot path, so a scripted invocation
  * and a typed message go through exactly the same code.
+ *
+ * No create-only mode: `AgentHandleDispatchRequest` omits `uid`, so the
+ * exactly-once creation `flue run --new` offers is not reachable from the handle.
+ * Reimplementing it some other way would be guesswork against a contract the
+ * framework deliberately narrowed — use `flue run --new` for that CI case.
  */
-export async function ask(agent: Agent, id: string, message: string): Promise<string> {
+export async function askFull(agent: Agent, id: string, message: string): Promise<Exchange> {
   const handle = init(agent, { id })
   const receipt = await handle.dispatch(message)
   const reply = await handle.read(receipt)
-  return reply.text
+  return {
+    text: reply.text,
+    submissionId: reply.submissionId,
+    ...(reply.uid ? { uid: reply.uid } : {}),
+  }
+}
+
+/** The reply text alone — what most callers want. */
+export async function ask(agent: Agent, id: string, message: string): Promise<string> {
+  return (await askFull(agent, id, message)).text
 }
 
 /** One message in, one reply out, for `chat "…"` and for piped stdin. */
-export async function askOnce(options: ChatOptions & { message: string }): Promise<void> {
-  const text = await ask(options.agent, options.id, options.message)
-  // stdout carries the reply and nothing else, so it stays pipeable.
-  stdout.write(`${text}\n`)
+export async function askOnce(
+  options: ChatOptions & { message: string; json?: boolean },
+): Promise<void> {
+  const exchange = await askFull(options.agent, options.id, options.message)
+
+  // stdout carries the reply and nothing else, so it stays pipeable. With --json
+  // it carries exactly one envelope instead, matching `flue run --json` so the
+  // same `jq -r .message` works against either.
+  stdout.write(
+    options.json
+      ? `${JSON.stringify({
+          id: options.id,
+          agent: options.name ?? 'agent',
+          submissionId: exchange.submissionId,
+          outcome: 'completed',
+          message: exchange.text,
+          ...(exchange.uid ? { uid: exchange.uid } : {}),
+        })}\n`
+      : `${exchange.text}\n`,
+  )
 }
 
 /**

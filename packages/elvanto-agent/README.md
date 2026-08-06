@@ -143,12 +143,19 @@ answer when the host is somebody else's: Claude Desktop, a remote connector,
 another framework. It is the wrong answer for talking to yourself. If you do have a
 genuinely remote MCP server, `mcp: { url, token }` connects one.
 
-## One binary: CLI, server, or Worker
+## Running it: a binary for the terminal, Flue's build for HTTP
 
-`@criticalcodes/elvanto-agent/cli` runs an agent three ways from a single
-executable. It leans on Flue's `start({ agents })`, which boots the runtime in the
-current process with no server, no `app.ts` and no `'use agent'` scan — so the CLI
-needs neither Vite nor Wrangler.
+The split is deliberate, and it took a wrong turn to find. Flue has no interactive
+chat, so this package provides one. Flue *does* build a server — `vite build` emits
+`dist/server.mjs` for Node and a Worker for Cloudflare — so this package does not,
+and an earlier version that did has been deleted. It reproduced the build with an
+extra dependency and worked only on Node.
+
+### The terminal
+
+`@criticalcodes/elvanto-agent/cli` leans on Flue's `start({ agents })`, which boots
+the runtime in the current process with no server, no `app.ts` and no `'use agent'`
+scan — so it needs neither Vite nor Wrangler.
 
 ```ts
 #!/usr/bin/env node
@@ -161,22 +168,42 @@ await runElvantoCli({ agent: Church, name: 'church' })
 ```console
 $ church "who is on the roster this Sunday?"   # one question, answer on stdout
 $ church                                       # interactive terminal chat
-$ church serve                                 # HTTP API + a web chat UI on :8787
 $ echo "who is serving?" | church              # pipeable
+$ church --json "…" | jq -r .message           # scriptable
 ```
 
-- **Terminal chat** is a plain `readline` transcript — no full-screen renderer, so
-  scrollback and piping keep working.
-- **`serve`** mounts the agent's routes and a self-contained web chat page at `/`.
-  One HTML file, no bundler, no framework, works the same on Node and Workers. It
-  polls rather than streams; for a real application use
-  [`@flue/react`](https://flueframework.com/docs/guide/react/)'s `useFlueAgent()`.
-- **Conversations persist** in `./<name>.db`, so `--id` continues one across runs.
-- **Extra subcommands** come from `commands`, for a scheduled job worth running by
-  hand.
+- A plain `readline` transcript, not a full-screen renderer, so scrollback, copy
+  and piping keep working.
+- Conversations persist in `./<name>.db`, so `--id` continues one across runs.
+- `.env` is loaded, with real environment variables winning — matching `flue run`.
+- Extra subcommands come from `commands`, for a scheduled job worth running by hand.
 
-Cloudflare still builds through Vite, because Durable Object codegen requires it —
-but it imports the same agent module, so behaviour is identical across all three.
+`flue run` remains the right tool for a CI one-shot: it has `--new` for
+exactly-once conversation creation, which the `init()` handle deliberately does not
+expose.
+
+### HTTP, and the web chat
+
+Mount the routes in your `app.ts` and let Flue build the server:
+
+```ts
+// src/app.ts
+import { elvantoRoutes } from '@criticalcodes/elvanto-agent/routes'
+import { Church } from './agents/church.ts'
+
+export default elvantoRoutes({ agent: Church, title: 'Church office' })
+```
+
+```console
+$ FLUE_TARGET=node vite build && node dist/server.mjs   # Node
+$ vite build && wrangler deploy                          # Cloudflare
+```
+
+That serves the agent's API and a self-contained web chat at `/` — one HTML file,
+no bundler, no framework, identical on both targets. It polls rather than streams;
+for a real application use
+[`@flue/react`](https://flueframework.com/docs/guide/react/)'s `useFlueAgent()`.
+Pass `chatUi: false` if your application has its own front end.
 
 ## Extending it
 

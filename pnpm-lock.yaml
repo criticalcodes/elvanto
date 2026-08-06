@@ -38,9 +38,6 @@ importers:
       '@criticalcodes/elvanto':
         specifier: workspace:*
         version: link:../elvanto
-      '@hono/node-server':
-        specifier: ^2.0.3
-        version: 2.1.0(hono@4.13.0)
       valibot:
         specifier: ^1.1.0
         version: 1.4.2(typescript@5.9.3)
