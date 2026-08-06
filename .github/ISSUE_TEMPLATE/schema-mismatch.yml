@@ -1,0 +1,69 @@
+name: Schema mismatch
+description: Elvanto returned a shape this library did not expect
+title: 'Schema mismatch: '
+labels: [schema-mismatch]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks — this is the most useful kind of report this project can get.
+
+        Elvanto publishes no machine-readable API spec, so every response schema
+        here is derived from its documentation examples and then confirmed against
+        real accounts where possible. Documentation and reality have already
+        diverged twice: `school_grade` is an object rather than the name it is
+        documented as, and `family` is not the person collection its name implies.
+        Both were found this way.
+
+        **Please do not paste real member or giving data.** Field *names* and
+        *shapes* are what's needed — `"string"` or `{id, name}` — never values.
+        If you include a sample, replace every value with its type.
+  - type: input
+    id: endpoint
+    attributes:
+      label: Endpoint
+      description: The registry id or the API path.
+      placeholder: people.getInfo — or people/getInfo
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: The error
+      description: >
+        The message from `ElvantoResponseValidationError`, or the warning logged
+        under `validate: 'warn'`. These report by path and contain no field values,
+        so they are safe to paste verbatim.
+      placeholder: 'person.family: Invalid input: expected array, received object'
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: What Elvanto actually returned
+      description: >
+        The shape of the offending field, with values replaced by their types. The
+        smoke sweep (`pnpm smoke`) prints exactly this and redacts values by default.
+      placeholder: |
+        "family": {
+          "family_id": "<string>",
+          "family_member": [{ "id": "<string>", "relationship": "<string>" }]
+        }
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      placeholder: '@criticalcodes/elvanto 0.1.0'
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have replaced all real values with their types, and included no member or giving data.
+          required: true

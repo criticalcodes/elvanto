@@ -1,5 +1,8 @@
 # Elvanto for TypeScript
 
+[![CI](https://github.com/criticalcodes/elvanto/actions/workflows/ci.yml/badge.svg)](https://github.com/criticalcodes/elvanto/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Three things that share one source of truth, for the [Elvanto](https://www.elvanto.com)
 church management API:
 
@@ -215,6 +218,17 @@ support **Node 20+**, which is a separate claim and tested separately: CI packs 
 SDK and runs `scripts/runtime-check.mjs` against the tarball on Node 20, 22 and 24,
 installed with plain npm. Narrowing `engines` to match the toolchain would have been
 easier and false.
+
+`pnpm check:secrets` fails on credential-shaped strings and on sweep output in
+tracked files, and runs first in CI. It also works as a pre-commit hook:
+
+```console
+echo 'node scripts/check-no-secrets.mjs --staged' > .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions that aren't obvious from
+the code, and [SECURITY.md](SECURITY.md) for what's worth reporting.
 
 Tests never touch the network: the SDK takes an injected `fetch`, and the CLI and
 MCP tests run against a local stub server and an in-memory MCP transport

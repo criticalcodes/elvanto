@@ -1,0 +1,12 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/criticalcodes/elvanto/security/advisories/new
+    about: >
+      Report privately instead of opening an issue. See SECURITY.md — note that
+      errors deliberately carry raw responses, which is documented rather than a bug.
+  - name: Elvanto API documentation
+    url: https://www.elvanto.com/api/
+    about: >
+      For how the API itself behaves. This project only wraps it, and its
+      documentation is the source these schemas are derived from.

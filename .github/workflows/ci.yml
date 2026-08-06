@@ -24,6 +24,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # First, and without needing dependencies: if a credential or account data
+      # has been committed, that matters more than whether the tests pass.
+      - name: Check for secrets and account data
+        run: node scripts/check-no-secrets.mjs
+
       - run: pnpm install --frozen-lockfile
 
       # Typecheck and test resolve the SDK to source, so neither needs a build.
