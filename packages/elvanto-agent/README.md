@@ -39,7 +39,8 @@ everything an agent is composed of, which is what this is:
 | `useElvantoBase()` | Mounts the tools, the raw endpoints and the base instruction |
 | `findPerson`, `roster`, `nextServing`, `serviceBrief`, `songHistory`, `listCustomFields` | The tools individually, as factories |
 | `endpointTools()`, `CORE_ENDPOINTS`, `ALL_ENDPOINTS` | The 25 raw endpoints as native tools |
-| `runElvantoCli()` (from `/cli`) | The one-binary runner: chat, serve, web UI |
+| `elvantoRoutes()` (from `/routes`) | The HTTP surface: agent API, web chat, token guard |
+| `runElvantoCli()` (from `/cli`) | The terminal runner: one-shot and interactive chat |
 | `elvantoMcpConnection()` | A remote MCP connection, if you have one |
 | `clientFromEnv()` | The shared Elvanto client, with agent-appropriate defaults |
 | `personCard`, `rosterEntries`, `serviceHeader`, … | The shaping helpers, for building your own tools |
@@ -204,6 +205,36 @@ no bundler, no framework, identical on both targets. It polls rather than stream
 for a real application use
 [`@flue/react`](https://flueframework.com/docs/guide/react/)'s `useFlueAgent()`.
 Pass `chatUi: false` if your application has its own front end.
+
+### It fails closed
+
+Flue mounts agents with **no authentication** — its routing guide is explicit that
+anyone who can reach a conversation URL can talk to it, read its full history and
+abort its work. Behind an Elvanto agent is every member record in the account, so
+`elvantoRoutes` will not serve without a shared token:
+
+| `ELVANTO_AGENT_TOKEN` | Behaviour |
+| --- | --- |
+| set | Bearer header for API clients; a sign-in form for browsers, trading the token for a signed HttpOnly cookie |
+| unset | The agent is **not mounted**; every route returns 503 with an explanation |
+
+```ts
+elvantoRoutes({ agent: Church })                    // token required
+elvantoRoutes({ agent: Church, auth: 'external' })  // something in front authenticates
+```
+
+`auth: 'external'` is for a deployment behind [Cloudflare
+Access](https://developers.cloudflare.com/cloudflare-one/policies/access/), an
+authenticating proxy, or a private network — which is the better answer for anything
+real, since it brings identity, audit and revocation that a shared secret cannot. It
+must be written out deliberately: forgetting to configure a token should not look
+like choosing to delegate authentication.
+
+**No per-conversation authorization.** Conversation ids are caller-chosen path
+segments, so any token-holder can read any conversation by guessing its id. That is
+acceptable when every holder may see everything and not otherwise — for per-user
+access, put real identity in front and add an ownership check, as Flue's [routing
+guide](https://flueframework.com/docs/guide/routing/) describes.
 
 ## Extending it
 
