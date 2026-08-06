@@ -128,6 +128,13 @@ you connect it to a model:
   API key scoped without financial access, or don't run this server.
 - **Whatever a tool returns enters the model's context**, and your MCP client may
   log or retain it. The 25-record default limits blast radius; it doesn't remove it.
+- **Agent frameworks that persist sessions persist this data too.** A durable
+  agent runtime records the conversation — including tool results — so member
+  records and giving history end up in whatever store backs it, with a lifetime
+  and access model that has nothing to do with Elvanto's. That is a materially
+  different risk from an ephemeral chat, and worth deciding about deliberately
+  before connecting this to one. Narrowing what the agent can reach (fewer tools,
+  or a scoped API key) is more effective than trying to scrub it afterwards.
 - **Debug logs never contain credentials or returned records** — only counts,
   statuses and timings. Logs go to stderr, so they can't corrupt the stdio
   protocol channel.

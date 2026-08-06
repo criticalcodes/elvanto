@@ -220,6 +220,46 @@ SDK's **source**, not its build output — via an alias in `vitest.config.ts` an
 invisible to two thirds of the suite until someone runs `pnpm build`, and the
 tests pass against the previous build.
 
+## Using this from an agent
+
+Two routes, and the choice matters more than it looks.
+
+**The MCP server**, for a general-purpose agent that should be able to reach
+anything. `@criticalcodes/elvanto-mcp` works today with any MCP-capable host — 25
+read-only tools, schemas generated from the registry, a 25-record page default and
+a response cap so a large account can't flood a context window.
+
+**The SDK directly**, for an agent with a specific job. Everything needed to
+generate tools is public, so a framework can enumerate the registry rather than
+hand-writing wrappers:
+
+```ts
+import { endpointIds, getEndpoint, paramsJsonSchema, createClient } from '@criticalcodes/elvanto'
+
+const client = createClient({ validate: 'warn' })
+const tools = endpointIds.map((id) => {
+  const endpoint = getEndpoint(id)
+  return {
+    name: id,
+    description: endpoint.summary,
+    // JSON Schema, or reach `endpoint.params` for the zod schema directly.
+    inputSchema: paramsJsonSchema(endpoint),
+    run: (args) => client.call(id, args),
+  }
+})
+```
+
+Three things worth deciding up front:
+
+- **Exposing fewer tools beats exposing all 25.** An agent that only needs rosters
+  does not need the giving endpoints, and the narrowest surface is the easiest to
+  reason about.
+- **`validate: 'warn'` is usually right for an agent**, so an undocumented Elvanto
+  field degrades the response instead of failing the session. Keep `throw` in tests.
+- **Cap what reaches the context.** The MCP server does this for you; direct SDK
+  use does not — `fetchAll` on a large account will happily return 50,000 records.
+  Use `paginate` with `maxRecords`, or a small `page_size`.
+
 ## Roadmap
 
 Deliberately not in this version:
