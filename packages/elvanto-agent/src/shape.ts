@@ -98,6 +98,21 @@ export function rosterEntries(service: Service): RosterEntry[] {
   return entries
 }
 
+/**
+ * How many positions the service defines, filled or not.
+ *
+ * Needed because "nobody is serving" and "the roster has not been built yet" look
+ * identical from the entries alone, and they mean opposite things to whoever
+ * asked. A live account showed a service with 42 defined positions and zero people
+ * assigned to any of them; reporting that as `0` and nothing else would invite the
+ * reader to conclude the service needs no volunteers.
+ */
+export function countPositions(service: Service): number {
+  let total = 0
+  for (const plan of service.volunteers ?? []) total += (plan.positions ?? []).length
+  return total
+}
+
 /** A service, identified without its contents. */
 export interface ServiceHeader {
   id: string
@@ -113,10 +128,13 @@ export function serviceHeader(service: Service): ServiceHeader {
   const header: ServiceHeader = { id: service.id }
   if (service.name) header.name = service.name
   if (service.date) header.date = service.date
-  if (service.service_type && typeof service.service_type === 'object') {
+  // Elvanto returns `{ id: "", name: "" }` rather than omitting an unset
+  // reference, so the name has to be checked as well as the object — otherwise
+  // every service without a type carries `type: ""`, which reads as a value.
+  if (service.service_type && typeof service.service_type === 'object' && service.service_type.name) {
     header.type = service.service_type.name
   }
-  if (service.location && typeof service.location === 'object') {
+  if (service.location && typeof service.location === 'object' && service.location.name) {
     header.location = service.location.name
   }
   // Only the two documented values are translated. Anything else is left off

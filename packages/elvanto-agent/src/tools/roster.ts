@@ -3,6 +3,7 @@ import * as v from 'valibot'
 import type { ElvantoClient, Service } from '@criticalcodes/elvanto'
 import {
   addDays,
+  countPositions,
   isoDate,
   rosterEntries,
   serviceHeader,
@@ -57,9 +58,14 @@ async function servicesInRange(
 }
 
 export interface ServiceRoster extends ServiceHeader {
+  /** Positions the service defines, whether or not anyone fills them. */
   positionCount: number
+  /** People actually scheduled. Below `positionCount` means unfilled slots. */
+  assignedCount: number
   entries: RosterEntry[]
   truncated?: { dropped: number; of: number; advice: string }
+  /** Present when positions exist but nobody is in them. */
+  note?: string
 }
 
 /**
@@ -81,7 +87,10 @@ export function roster(deps: ToolDeps): ToolDefinition {
       `covers the next ${DEFAULT_WINDOW_DAYS} days. Past dates work. Each row gives ` +
       'the department, position, person and their confirmation status. Use this ' +
       'for "who is on this Sunday" and similar questions — do not try to assemble ' +
-      'it from the raw service endpoints.',
+      'it from the raw service endpoints. Note the difference between ' +
+      'positionCount and assignedCount: positions with nobody assigned mean the ' +
+      'roster has not been filled in, which is not the same as a service needing ' +
+      'no volunteers.',
     input: v.object({
       date: v.optional(
         v.pipe(dateSchema, v.description('A single day, YYYY-MM-DD.')),
@@ -136,21 +145,37 @@ export function roster(deps: ToolDeps): ToolDefinition {
           MAX_ENTRIES_PER_SERVICE,
           'Filter by department to see the rest.',
         )
+        const positions = countPositions(service)
         return {
           ...serviceHeader(service),
-          positionCount: capped.items.length,
+          positionCount: positions,
+          assignedCount: capped.items.length,
           entries: capped.items,
           ...(capped.truncated ? { truncated: capped.truncated } : {}),
+          // The distinction that matters: an empty roster on a service with
+          // positions is work outstanding, not a service that needs nobody.
+          ...(positions > 0 && capped.items.length === 0
+            ? {
+                note:
+                  `${positions} position(s) are defined but nobody is assigned to any ` +
+                  `of them — the roster for this service has not been filled in.`,
+              }
+            : {}),
+          ...(positions === 0 && capped.items.length === 0
+            ? { note: 'This service defines no volunteer positions at all.' }
+            : {}),
         }
       })
 
       log.info(`roster: ${services.length} service(s) between ${start} and ${end}`)
 
-      const scheduled = rosters.reduce((sum, r) => sum + r.positionCount, 0)
+      const scheduled = rosters.reduce((sum, r) => sum + r.assignedCount, 0)
+      const positions = rosters.reduce((sum, r) => sum + r.positionCount, 0)
       return {
         output: {
           range: { start, end },
           serviceCount: rosters.length,
+          positionCount: positions,
           scheduledCount: scheduled,
           services: rosters,
           ...(services.length >= MAX_SERVICES

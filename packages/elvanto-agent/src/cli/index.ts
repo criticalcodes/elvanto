@@ -139,13 +139,33 @@ export async function runElvantoCli(
   })
   void flue
 
-  const runOnce = (message: string, id = 'cli') => ask(options.agent, id, message)
+  /**
+   * The conversation to use.
+   *
+   * A fresh id when none is given, matching `flue run`. An earlier version
+   * defaulted to the fixed string `'cli'`, which meant every invocation continued
+   * one ever-growing conversation: unrelated questions re-answered each other, the
+   * transcript grew without bound, and member data retrieved for one question
+   * stayed in context for the next. Continuing a conversation has to be something
+   * you ask for.
+   *
+   * Printed to stderr — never stdout, which carries only the reply — because an id
+   * you cannot see is an id you cannot continue.
+   */
+  const explicitId = flagString(args, 'id')
+  const conversationId = explicitId ?? freshConversationId()
+  // Not for the interactive loop, whose own header already names it.
+  if (!explicitId && !(command === undefined && rest.length === 0 && process.stdin.isTTY)) {
+    stderr.write(`${options.name}: conversation ${conversationId}\n`)
+  }
+
+  const runOnce = (message: string, id = conversationId) => ask(options.agent, id, message)
 
   try {
     switch (command) {
       case undefined:
       case 'chat': {
-        const id = flagString(args, 'id') ?? 'cli'
+        const id = conversationId
         const message = rest.join(' ').trim()
 
         // A piped or argument-supplied message is a one-shot; an interactive
@@ -205,7 +225,7 @@ export async function runElvantoCli(
       // a script must not have to parse stderr to learn what happened.
       stdout.write(
         `${JSON.stringify({
-          id: flagString(args, 'id') ?? 'cli',
+          id: conversationId,
           agent: options.name,
           outcome: aborted ? 'aborted' : 'failed',
           error: { message: detail },
@@ -320,6 +340,21 @@ function silenceSqliteWarning(): void {
   })
 }
 
+/**
+ * A fresh conversation id.
+ *
+ * Time-ordered so a directory listing of conversations reads chronologically, and
+ * random-suffixed so two invocations in the same millisecond cannot collide.
+ * `crypto.randomUUID` rather than a ULID dependency — nothing here needs the
+ * lexicographic guarantees a real ULID buys.
+ */
+function freshConversationId(): string {
+  return `cli-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`
+}
+
+/** Exported for the regression test that pins the default away from a fixed id. */
+export const freshIdForTest = freshConversationId
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = []
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
@@ -344,12 +379,14 @@ Usage:
 ${usage.join('\n')}
 
 Options:
-  --id <id>            Conversation to create or continue. Default "cli".
+  --id <id>            Conversation to create or continue. Defaults to a fresh
+                       one per invocation, printed on stderr.
   --json               Print one JSON result envelope instead of the reply.
   --env <path>         Load this .env-format file instead of ./.env.
   --help               This.
 
-Conversations persist between runs, so reusing --id continues one. Reads
+Each run starts a new conversation unless --id names one; pass the same --id
+again to continue it. Reads
 credentials from the environment (or .env): ELVANTO_API_KEY, and a model
 provider key such as ANTHROPIC_API_KEY.
 

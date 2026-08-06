@@ -640,3 +640,89 @@ describe('lazy client construction', () => {
     expect(built).toBe(1)
   })
 })
+
+describe('roster: unfilled positions', () => {
+  /** A service with positions defined but nobody in them — a live account state. */
+  function serviceWithEmptyPositions(id: string, date: string, positions: number) {
+    return {
+      id,
+      name: 'Sunday Gathering',
+      date,
+      status: 1,
+      volunteers: {
+        plan: [
+          {
+            time_id: 't1',
+            positions: Array.from({ length: positions }, (_, index) => ({
+              department_name: 'Music',
+              position_name: `Position ${index}`,
+              volunteers: [],
+            })),
+          },
+        ],
+      },
+    }
+  }
+
+  test('distinguishes "nobody assigned yet" from "no positions"', async () => {
+    // The smoke sweep found a real service with 42 defined positions and zero
+    // people in any of them. Reporting that as 0 and nothing else invites the
+    // reader to conclude the service needs no volunteers.
+    const { client } = stubClient(() =>
+      page('services', 'service', [serviceWithEmptyPositions('s1', '2026-08-09 09:00:00', 42)]),
+    )
+
+    const { output } = await callTool(roster({ client, now: fixedClock }))
+    const result = output as {
+      positionCount: number
+      scheduledCount: number
+      services: Array<{ positionCount: number; assignedCount: number; note?: string }>
+    }
+
+    expect(result.positionCount).toBe(42)
+    expect(result.scheduledCount).toBe(0)
+    expect(result.services[0]!.note).toContain('not been filled in')
+  })
+
+  test('says so when a service defines no positions at all', async () => {
+    const { client } = stubClient(() =>
+      page('services', 'service', [serviceWithEmptyPositions('s1', '2026-08-09 09:00:00', 0)]),
+    )
+    const { output } = await callTool(roster({ client, now: fixedClock }))
+    const result = output as { services: Array<{ note?: string }> }
+    expect(result.services[0]!.note).toContain('no volunteer positions')
+  })
+
+  test('a filled roster carries no note', async () => {
+    const { client } = stubClient(() =>
+      page('services', 'service', [
+        serviceWithRoster('s1', '2026-08-09 09:00:00', [{ id: 'p1', name: 'Ada' }]),
+      ]),
+    )
+    const { output } = await callTool(roster({ client, now: fixedClock }))
+    const result = output as { services: Array<{ assignedCount: number; note?: string }> }
+    expect(result.services[0]!.assignedCount).toBe(1)
+    expect(result.services[0]!.note).toBeUndefined()
+  })
+})
+
+describe('serviceHeader: empty references', () => {
+  test('an unset service type is omitted, not reported as an empty string', async () => {
+    // Elvanto returns { id: "", name: "" } rather than omitting the field, and
+    // `type: ""` reads as a value rather than an absence.
+    const { client } = stubClient(() =>
+      page('services', 'service', [
+        {
+          id: 's1',
+          date: '2026-08-09 09:00:00',
+          service_type: { id: '', name: '' },
+          location: { id: '', name: '' },
+        },
+      ]),
+    )
+    const { output } = await callTool(roster({ client, now: fixedClock }))
+    const service = (output as { services: Array<Record<string, unknown>> }).services[0]!
+    expect(service).not.toHaveProperty('type')
+    expect(service).not.toHaveProperty('location')
+  })
+})

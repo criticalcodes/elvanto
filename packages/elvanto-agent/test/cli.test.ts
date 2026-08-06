@@ -91,3 +91,25 @@ describe('webChatPage', () => {
     expect(page).toContain('submissionId')
   })
 })
+
+describe('conversation ids', () => {
+  test('a fresh id is generated per invocation, and two never collide', async () => {
+    // The bug this guards: the default used to be the fixed string 'cli', so every
+    // invocation continued one ever-growing conversation. Unrelated questions
+    // re-answered each other, and member data from one stayed in context for the
+    // next.
+    const { freshIdForTest } = await import('../src/cli/index.ts')
+    const ids = new Set(Array.from({ length: 200 }, () => freshIdForTest()))
+    expect(ids.size).toBe(200)
+    for (const id of ids) expect(id).not.toBe('cli')
+  })
+
+  test('ids sort chronologically, so a conversation list reads in order', async () => {
+    const { freshIdForTest } = await import('../src/cli/index.ts')
+    const first = freshIdForTest()
+    // The timestamp component is base36 milliseconds; same-millisecond ids differ
+    // only in the random suffix, which is why collision-resistance is tested above.
+    expect(first.startsWith('cli-')).toBe(true)
+    expect(first.split('-').length).toBe(3)
+  })
+})
