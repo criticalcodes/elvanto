@@ -50,13 +50,13 @@ importers:
         version: link:../elvanto-mcp
       '@flue/cli':
         specifier: ^2.0.3
-        version: 2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(@types/node@22.20.1)(esbuild@0.28.1)(hono@4.13.0)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(tsx@4.23.7)(typescript@5.9.3)(ws@8.21.0)(yaml@2.9.0)(zod@4.4.3)
+        version: 2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(@types/node@22.20.1)(esbuild@0.28.1)(hono@4.13.5)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(tsx@4.23.7)(typescript@5.9.3)(ws@8.21.0)(yaml@2.9.0)(zod@4.4.3)
       '@flue/runtime':
         specifier: ^2.0.3
         version: 2.0.3(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(typescript@5.9.3)(ws@8.21.0)(zod@4.4.3)
       '@flue/vite':
         specifier: ^2.0.3
-        version: 2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(hono@4.13.0)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.0(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.9.0))(ws@8.21.0)(zod@4.4.3)
+        version: 2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(hono@4.13.5)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.0(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.9.0))(ws@8.21.0)(zod@4.4.3)
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3)
@@ -64,8 +64,8 @@ importers:
         specifier: ^1.7.1
         version: 1.7.1(valibot@1.4.2(typescript@5.9.3))
       hono:
-        specifier: ^4.7.0
-        version: 4.13.0
+        specifier: ^4.13.5
+        version: 4.13.5
       vite:
         specifier: ^8.0.14
         version: 8.2.0(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.9.0)
@@ -1804,8 +1804,8 @@ packages:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
 
-  hono@4.13.0:
-    resolution: {integrity: sha512-jhunvfHWxd7J5EFfSgH4xsYJzSe/lfqbUCxiyyeaQasUsXeEHXtzVid+7EOGByc5JnFa23SSFL3Y2RV/z1T+eQ==}
+  hono@4.13.5:
+    resolution: {integrity: sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw==}
     engines: {node: '>=16.9.0'}
 
   html-escaper@2.0.2:
@@ -3261,10 +3261,10 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@flue/cli@2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(@types/node@22.20.1)(esbuild@0.28.1)(hono@4.13.0)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(tsx@4.23.7)(typescript@5.9.3)(ws@8.21.0)(yaml@2.9.0)(zod@4.4.3)':
+  '@flue/cli@2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(@types/node@22.20.1)(esbuild@0.28.1)(hono@4.13.5)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(tsx@4.23.7)(typescript@5.9.3)(ws@8.21.0)(yaml@2.9.0)(zod@4.4.3)':
     dependencies:
       '@flue/runtime': 2.0.3(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(typescript@5.9.3)(ws@8.21.0)(zod@4.4.3)
-      '@flue/vite': 2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(hono@4.13.0)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.0(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.9.0))(ws@8.21.0)(zod@4.4.3)
+      '@flue/vite': 2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(hono@4.13.5)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.0(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.9.0))(ws@8.21.0)(zod@4.4.3)
       '@vercel/detect-agent': 1.2.4
       cac: 7.0.0
       minisearch: 7.2.0
@@ -3314,10 +3314,10 @@ snapshots:
     dependencies:
       '@earendil-works/pi-agent-core': 0.83.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.83.0(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)
-      '@hono/node-server': 2.1.0(hono@4.13.0)
+      '@hono/node-server': 2.1.0(hono@4.13.5)
       '@modelcontextprotocol/client': 2.0.0
       '@valibot/to-json-schema': 1.7.1(valibot@1.4.2(typescript@5.9.3))
-      hono: 4.13.0
+      hono: 4.13.5
       js-yaml: 5.2.3
       ulidx: 2.4.1
       valibot: 1.4.2(typescript@5.9.3)
@@ -3330,10 +3330,10 @@ snapshots:
       - ws
       - zod
 
-  '@flue/vite@2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(hono@4.13.0)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.0(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.9.0))(ws@8.21.0)(zod@4.4.3)':
+  '@flue/vite@2.0.3(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(hono@4.13.5)(react@19.2.8)(rolldown@1.2.2)(supports-color@10.2.2)(typescript@5.9.3)(vite@8.2.0(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.9.0))(ws@8.21.0)(zod@4.4.3)':
     dependencies:
       '@flue/runtime': 2.0.3(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(typescript@5.9.3)(ws@8.21.0)(zod@4.4.3)
-      '@hono/node-server': 2.1.0(hono@4.13.0)
+      '@hono/node-server': 2.1.0(hono@4.13.5)
       agents: 0.20.1(@babel/core@8.0.1)(@babel/runtime@7.29.7)(@cloudflare/workers-types@5.20260804.1)(@modelcontextprotocol/client@2.0.0)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3))(@modelcontextprotocol/server@2.0.0)(react@19.2.8)(rolldown@1.2.2)(vite@8.2.0(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.7)(yaml@2.9.0))(zod@4.4.3)
       magic-string: 1.1.0
       tinyglobby: 0.2.17
@@ -3378,9 +3378,9 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@hono/node-server@2.1.0(hono@4.13.0)':
+  '@hono/node-server@2.1.0(hono@4.13.5)':
     dependencies:
-      hono: 4.13.0
+      hono: 4.13.5
 
   '@img/colour@1.1.0': {}
 
@@ -3535,7 +3535,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.4.3)':
     dependencies:
-      '@hono/node-server': 2.1.0(hono@4.13.0)
+      '@hono/node-server': 2.1.0(hono@4.13.5)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -3545,7 +3545,7 @@ snapshots:
       eventsource-parser: 3.1.0
       express: 5.2.1(supports-color@10.2.2)
       express-rate-limit: 8.6.1(express@5.2.1(supports-color@10.2.2))(supports-color@10.2.2)
-      hono: 4.13.0
+      hono: 4.13.5
       jose: 6.2.8
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -4312,7 +4312,7 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  hono@4.13.0: {}
+  hono@4.13.5: {}
 
   html-escaper@2.0.2: {}
 
