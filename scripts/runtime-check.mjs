@@ -15,7 +15,7 @@
  */
 import assert from 'node:assert/strict'
 
-const { createClient, parseElvantoDate, endpointIds } = await import(
+const { createClient, parseElvantoDate, endpointIds, readEndpointIds, getEndpoint, updatePeople } = await import(
   '@criticalcodes/elvanto'
 )
 
@@ -92,6 +92,9 @@ await assert.rejects(
   (error) => error.isAuthError === true,
 )
 
-assert.equal(endpointIds.length, 25)
+assert.equal(endpointIds.length, 34)
+assert.equal(readEndpointIds.length, 25)
+assert.equal(getEndpoint('people.remove').effect, 'destructive')
+assert.equal(typeof updatePeople, 'function')
 
 console.log(`runtime check passed on Node ${process.version}`)
