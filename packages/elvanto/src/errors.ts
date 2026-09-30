@@ -86,6 +86,33 @@ export class ElvantoTransportError extends ElvantoError {
   }
 }
 
+/**
+ * A write may or may not have been applied.
+ *
+ * Thrown in place of a transport error, a timeout or a 5xx when the request was
+ * a write. Any of those can happen after Elvanto has acted — the response is
+ * what got lost — so retrying could create a second person or group. Writes are
+ * therefore never retried automatically (except after a 429, which Elvanto sends
+ * before doing anything), and this error says so.
+ *
+ * Check the account with a read before trying again. `cause` is the underlying
+ * failure.
+ */
+export class ElvantoWriteOutcomeUnknownError extends ElvantoError {
+  readonly endpoint: string
+  constructor(args: { endpoint: string; cause: unknown }) {
+    const detail =
+      args.cause instanceof Error ? args.cause.message : String(args.cause)
+    super(
+      `Elvanto ${args.endpoint} may or may not have been applied: ${detail}. ` +
+        `It was not retried, because repeating a write can apply it twice. ` +
+        `Check the current state with a read before trying again.`,
+      { cause: args.cause },
+    )
+    this.endpoint = args.endpoint
+  }
+}
+
 /** Parameters failed validation before anything was sent. */
 export class ElvantoRequestValidationError extends ElvantoError {
   readonly endpoint: string

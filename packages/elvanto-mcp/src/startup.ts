@@ -63,6 +63,10 @@ Environment:
   ELVANTO_PROFILE                 Which stored grant to use (default "default")
   ELVANTO_CREDENTIALS             Override the credentials file path
   ELVANTO_VALIDATE                throw (default) | warn | off
+  ELVANTO_MCP_WRITES              off (default) | write | all. Which tools that
+                                  change the account to offer: write adds
+                                  creates, edits and group/flow membership; all
+                                  also adds deletes and removals
   ELVANTO_MCP_PAGE_SIZE           Records per call when unspecified (default 25)
   ELVANTO_MCP_MAX_RESPONSE_CHARS  Response size cap (default 100000)
   ELVANTO_MCP_TOKEN               Bearer token required by --http. Mandatory when
@@ -153,6 +157,15 @@ export function planStartup(
         'every tool call will fail until one is provided. Either run `elvanto login` ' +
         '(from @criticalcodes/elvanto-cli) to sign in as yourself, or find your key ' +
         'in Elvanto under Settings > Account Settings > Secret API Key.',
+    )
+  }
+  if (config.writes && config.writes !== 'off') {
+    // Said on every start, because the MCP client's own UI may not make it
+    // obvious that this server can now change the account.
+    warnings.push(
+      `Write tools are enabled (ELVANTO_MCP_WRITES=${config.writes}). A connected ` +
+        `model can ${config.writes === 'all' ? 'create, change and delete' : 'create and change'} ` +
+        `records in the Elvanto account.`,
     )
   }
   if (transport.kind === 'http' && transport.token === undefined) {

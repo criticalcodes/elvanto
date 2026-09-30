@@ -5,7 +5,7 @@ import {
   DEFAULT_PAGE_SIZE,
   MIN_MAX_RESPONSE_CHARS,
   describeParams,
-  endpointIds,
+  readEndpointIds,
   endpointToolDescription,
   fitToBudget,
   getEndpoint,
@@ -13,7 +13,7 @@ import {
   toModelPayload,
   withDefaultPageSize,
   type EndpointDefinition,
-  type EndpointId,
+  type ReadEndpointId,
   type ParamDescriptor,
 } from '@criticalcodes/elvanto'
 import { clientOf, type ToolDeps } from './kit.ts'
@@ -114,7 +114,7 @@ export function inputSchemaFor(endpoint: EndpointDefinition): v.GenericSchema<
 /** One endpoint, as a Flue tool. */
 export function endpointTool(
   deps: ToolDeps,
-  id: EndpointId,
+  id: ReadEndpointId,
   options: EndpointToolOptions = {},
 ): ToolDefinition {
   const endpoint = getEndpoint(id)
@@ -163,7 +163,7 @@ export function endpointTool(
  *   and a compact result; offering both invites the model to pick the harder one.
  * - **`people.currentUser`.** OAuth-only, so with an API key it can only fail.
  */
-export const CORE_ENDPOINTS: readonly EndpointId[] = [
+export const CORE_ENDPOINTS: readonly ReadEndpointId[] = [
   'people.getAll',
   'people.getInfo',
   'people.categories.getAll',
@@ -175,13 +175,19 @@ export const CORE_ENDPOINTS: readonly EndpointId[] = [
   'calendar.events.getAll',
 ]
 
-/** Every read-only endpoint, financial included. */
-export const ALL_ENDPOINTS: readonly EndpointId[] = endpointIds
+/**
+ * Every read-only endpoint, financial included.
+ *
+ * Writes are excluded by type as well as by value: this toolkit reads and
+ * reports, and handing a model the ability to change the account should be a
+ * deliberate design, not a preset. See the README's Roadmap.
+ */
+export const ALL_ENDPOINTS: readonly ReadEndpointId[] = readEndpointIds
 
 /** Which endpoints to mount: a preset, an explicit list, or none. */
-export type EndpointSelection = 'core' | 'all' | readonly EndpointId[] | false
+export type EndpointSelection = 'core' | 'all' | readonly ReadEndpointId[] | false
 
-export function resolveEndpoints(selection: EndpointSelection): readonly EndpointId[] {
+export function resolveEndpoints(selection: EndpointSelection): readonly ReadEndpointId[] {
   if (selection === false) return []
   if (selection === 'core') return CORE_ENDPOINTS
   if (selection === 'all') return ALL_ENDPOINTS

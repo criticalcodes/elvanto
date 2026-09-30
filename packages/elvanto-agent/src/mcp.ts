@@ -1,5 +1,5 @@
 import { defineMcpConnection, type McpConnectionDefinition } from '@flue/runtime'
-import { endpointIds, toMcpToolName, type EndpointId } from '@criticalcodes/elvanto'
+import { readEndpointIds, toMcpToolName, type ReadEndpointId } from '@criticalcodes/elvanto'
 import { ambientEnv, type Env } from './client.ts'
 
 /**
@@ -11,7 +11,7 @@ import { ambientEnv, type Env } from './client.ts'
  * the server derives them from makes the two impossible to drift apart, and a
  * renamed endpoint a type error here rather than a startup failure in production.
  */
-function mcpTool(id: EndpointId): string {
+function mcpTool(id: ReadEndpointId): string {
   return toMcpToolName(id)
 }
 
@@ -52,7 +52,7 @@ export const CORE_MCP_TOOLS: readonly string[] = [
  * privacy note in the MCP server's README first — an agent runtime persists tool
  * results, so this puts giving history into whatever store backs the session.
  */
-export const ALL_MCP_TOOLS: readonly string[] = endpointIds.map((id) => toMcpToolName(id))
+export const ALL_MCP_TOOLS: readonly string[] = readEndpointIds.map((id) => toMcpToolName(id))
 
 export interface ElvantoMcpOptions {
   /** Server URL. Defaults to `ELVANTO_MCP_URL`. */

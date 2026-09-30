@@ -1,3 +1,4 @@
+import { createInterface } from 'node:readline/promises'
 import { Command, CommanderError, Option } from 'commander'
 import {
   ElvantoApiError,
@@ -7,6 +8,7 @@ import {
   ElvantoRequestValidationError,
   ElvantoResponseValidationError,
   ElvantoTransportError,
+  ElvantoWriteOutcomeUnknownError,
   endpointIds,
   getEndpoint,
   isPageEndpoint,
@@ -35,6 +37,8 @@ export const EXIT = {
   auth: 3,
   notFound: 4,
   schemaMismatch: 5,
+  /** A write failed in a way that may have followed Elvanto applying it. */
+  outcomeUnknown: 6,
 } as const
 
 interface GlobalOptions {
@@ -50,6 +54,7 @@ interface GlobalOptions {
   paramsJson?: string
   columns?: number
   debug?: boolean | string
+  yes?: boolean
 }
 
 export function buildProgram(): Command {
@@ -58,10 +63,13 @@ export function buildProgram(): Command {
   program
     .name('elvanto')
     .description(
-      'Read-only command-line access to the Elvanto API.\n\n' +
+      'Command-line access to the Elvanto API.\n\n' +
         'Authenticate with `elvanto login` (OAuth, signs you in as yourself), with ' +
         'ELVANTO_API_KEY (Settings > Account Settings > Secret API Key), or with ' +
-        '--api-key. Commands mirror the API: `elvanto people get-all`.',
+        '--api-key. Commands mirror the API: `elvanto people get-all`.\n\n' +
+        'Commands that delete or discard data ask for confirmation; pass --yes to ' +
+        'skip it in a script. Writes are never retried after a failure that may ' +
+        'have followed the change (exit code 6).',
     )
     .version(VERSION)
     .configureHelp({ sortSubcommands: true })
@@ -115,7 +123,10 @@ export function buildProgram(): Command {
       ),
     )
     .addOption(
-      new Option('--retries <number>', 'Retries for rate limits and 5xx.').argParser(
+      new Option(
+        '--retries <number>',
+        'Retries for rate limits and 5xx. Writes are only retried after a rate limit.',
+      ).argParser(
         Number,
       ),
     )
@@ -143,13 +154,21 @@ export function buildProgram(): Command {
         const endpoint = getEndpoint(id)
         const command = toCliPath(id).join(' ')
         const mark = endpoint.verified === 'live' ? '' : ' *'
+        const effect =
+          endpoint.effect === 'destructive'
+            ? ' [destructive]'
+            : endpoint.effect === 'write'
+              ? ' [write]'
+              : ''
         process.stdout.write(
-          `${command.padEnd(width)}  ${endpoint.summary}${mark}\n`,
+          `${command.padEnd(width)}  ${endpoint.summary}${effect}${mark}\n`,
         )
       }
       process.stdout.write(
         '\n* Response shape matches Elvanto\'s documented example but has not yet\n' +
-          '  been seen returning real data. Please report anything unexpected.\n',
+          '  been seen returning real data. Please report anything unexpected.\n' +
+          '[write] changes the account. [destructive] deletes or discards data,\n' +
+          '  and asks for confirmation unless --yes is passed.\n',
       )
     })
 
@@ -188,6 +207,11 @@ function attachEndpoint(program: Command, endpoint: EndpointDefinition): void {
 
   for (const option of buildOptions(endpoint)) {
     command.addOption(option)
+  }
+  if (endpoint.effect === 'destructive') {
+    command.addOption(
+      new Option('-y, --yes', 'Skip the confirmation prompt. Required when not run interactively.'),
+    )
   }
 
   command.action(async (_options: unknown, self: Command) => {
@@ -269,6 +293,10 @@ async function runEndpoint(
   const requestOptions =
     Object.keys(extraParams).length > 0 ? { extraParams } : {}
 
+  if (endpoint.effect === 'destructive' && !options.yes) {
+    await confirmDestructive(endpoint, { ...params, ...extraParams })
+  }
+
   const result =
     options.all && isPageEndpoint(endpoint)
       ? await fetchEveryPage(
@@ -287,6 +315,37 @@ async function runEndpoint(
     maxColumns: options.columns ?? 6,
   })
   process.stdout.write(`${output}\n`)
+}
+
+/**
+ * Asks before a destructive call, or refuses when there is no one to ask.
+ *
+ * A script without `--yes` fails rather than hanging on a prompt nobody will
+ * answer — and rather than proceeding, which would make the prompt pointless for
+ * exactly the unattended runs where a mistake is least likely to be noticed.
+ */
+async function confirmDestructive(
+  endpoint: EndpointDefinition,
+  params: Record<string, unknown>,
+): Promise<void> {
+  const command = toCliPath(endpoint.id).join(' ')
+  if (!process.stdin.isTTY) {
+    throw new UsageError(
+      `${command} deletes or discards data. Pass --yes to confirm when not ` +
+        `running interactively.`,
+    )
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stderr })
+  try {
+    const answer = await rl.question(
+      `${endpoint.summary} ${JSON.stringify(params)}\nThis cannot be undone. Continue? [y/N] `,
+    )
+    if (!/^y(es)?$/i.test(answer.trim())) {
+      throw new UsageError('Cancelled. Nothing was changed.')
+    }
+  } finally {
+    rl.close()
+  }
 }
 
 /**
@@ -326,6 +385,9 @@ async function fetchEveryPage(
 
 /** Maps an error to a message and exit code. */
 export function describeError(error: unknown): { message: string; code: number } {
+  if (error instanceof ElvantoWriteOutcomeUnknownError) {
+    return { message: error.message, code: EXIT.outcomeUnknown }
+  }
   if (error instanceof UsageError) {
     return { message: error.message, code: EXIT.usage }
   }

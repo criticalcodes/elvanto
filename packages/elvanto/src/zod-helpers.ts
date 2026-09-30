@@ -202,3 +202,41 @@ export function dateParam(description: string) {
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date in YYYY-MM-DD format')
     .describe(description)
 }
+
+/**
+ * A `"yes"`/`"no"` value to *set*, as the write endpoints take it.
+ *
+ * Distinct from {@link yesNo}, whose description is about filtering; the values
+ * are the same.
+ */
+export function yesNoValue(description: string) {
+  return z.enum(['yes', 'no']).optional().describe(description)
+}
+
+/**
+ * An optional `YYYY-MM-DD` date parameter.
+ */
+export function optionalDateParam(description: string) {
+  return z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected a date in YYYY-MM-DD format')
+    .optional()
+    .describe(description)
+}
+
+/**
+ * The `fields` object on a write: extra and custom fields to set.
+ *
+ * Unlike the read-side `fields`, which is a list of names to return, this maps
+ * each name to its new value — `{ "gender": "Female", "custom_<uuid>": "x" }`.
+ * Values are mostly strings; a few (`access_permissions`) take a list.
+ */
+export function fieldValuesParam(description: string) {
+  return z
+    .record(
+      z.string(),
+      z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+    )
+    .optional()
+    .describe(description)
+}

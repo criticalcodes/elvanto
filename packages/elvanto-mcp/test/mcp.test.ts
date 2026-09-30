@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
-import { ElvantoClient, endpointIds, toMcpToolName } from '@criticalcodes/elvanto'
+import { ElvantoClient, endpointIds, readEndpointIds, toMcpToolName } from '@criticalcodes/elvanto'
 import { afterEach, describe, expect, test } from 'vitest'
 import { z } from 'zod'
 import {
@@ -104,7 +104,7 @@ describe('tool listing', () => {
   test('exposes one tool per read-only endpoint', async () => {
     const { client } = await connect(() => peoplePage)
     const { tools } = await client.listTools()
-    expect(tools).toHaveLength(endpointIds.length)
+    expect(tools).toHaveLength(readEndpointIds.length)
   })
 
   test('names every tool in snake_case, with no camelCase leaking through', async () => {
@@ -160,6 +160,7 @@ describe('tool listing', () => {
         {
           id: 'widgets.getAll',
           path: 'widgets/getAll',
+          effect: 'read',
           summary: 'List widgets.',
           params: z.object({}),
           result: { kind: 'single', key: 'widget', item: z.looseObject({}) },
@@ -496,6 +497,112 @@ describe('configFromEnv', () => {
 describe('name derivation matches the SDK', () => {
   test('every tool name comes from the shared registry helper', () => {
     const tools = buildTools().map((tool: Tool) => tool.name)
-    expect(tools).toEqual(endpointIds.map((id) => toMcpToolName(id)))
+    expect(tools).toEqual(readEndpointIds.map((id) => toMcpToolName(id)))
+  })
+})
+
+describe('writes', () => {
+  const personAck = { status: 'ok', person: { id: 'p-new', family_id: 1 } }
+
+  test('are neither listed nor callable by default', async () => {
+    const { client, requests } = await connect(() => personAck)
+
+    const { tools } = await client.listTools()
+    expect(tools.map((tool) => tool.name)).toEqual(
+      readEndpointIds.map((id) => toMcpToolName(id)),
+    )
+
+    const result = await client.callTool({
+      name: 'elvanto_people_create',
+      arguments: { firstname: 'Ada', lastname: 'Lovelace' },
+    })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result.content)).toMatch(/Unknown tool/)
+    expect(requests).toHaveLength(0)
+  })
+
+  test('"write" adds the undoable ones and holds back the destructive ones', async () => {
+    const { client } = await connect(() => personAck, { writes: 'write' })
+    const names = (await client.listTools()).tools.map((tool) => tool.name)
+
+    expect(names).toContain('elvanto_people_create')
+    expect(names).toContain('elvanto_groups_add_person')
+    expect(names).toContain('elvanto_people_flows_steps_add_person')
+    expect(names).not.toContain('elvanto_people_remove')
+    expect(names).not.toContain('elvanto_people_edit')
+    expect(names).not.toContain('elvanto_groups_remove_person')
+
+    const removed = await client.callTool({
+      name: 'elvanto_people_remove',
+      arguments: { id: 'p' },
+    })
+    expect(removed.isError).toBe(true)
+  })
+
+  test('"all" exposes every endpoint', async () => {
+    const { client } = await connect(() => personAck, { writes: 'all' })
+    const names = (await client.listTools()).tools.map((tool) => tool.name)
+    expect(names).toEqual(endpointIds.map((id) => toMcpToolName(id)))
+  })
+
+  test('a write tool calls Elvanto and returns the acknowledgement', async () => {
+    const { client, requests } = await connect(() => personAck, { writes: 'write' })
+
+    const result = await client.callTool({
+      name: 'elvanto_people_create',
+      arguments: { firstname: 'Ada', lastname: 'Lovelace' },
+    })
+
+    expect(result.isError).toBeFalsy()
+    expect(JSON.stringify(result.content)).toContain('p-new')
+    expect(requests).toEqual([
+      { path: 'people/create', body: { firstname: 'Ada', lastname: 'Lovelace' } },
+    ])
+  })
+
+  test('hints tell the client which tools change or delete data', () => {
+    const tools = new Map(buildTools(DEFAULT_PAGE_SIZE, 'all').map((tool) => [tool.name, tool]))
+
+    expect(tools.get('elvanto_people_get_all')!.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    })
+    expect(tools.get('elvanto_people_create')!.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+    })
+    expect(tools.get('elvanto_people_remove')!.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+    })
+    expect(tools.get('elvanto_people_remove')!.description).toMatch(/cannot be\s+undone/)
+  })
+
+  test('an unknown outcome tells the model to check before retrying', async () => {
+    const { client, requests } = await connect(
+      () => {
+        throw new Error('unreachable')
+      },
+      { writes: 'write', clientOptions: { maxRetries: 3 } },
+    )
+
+    const result = await client.callTool({
+      name: 'elvanto_groups_add_person',
+      arguments: { id: 'g', person_id: 'p' },
+    })
+
+    expect(result.isError).toBe(true)
+    const text = JSON.stringify(result.content)
+    expect(text).toMatch(/may or may not have been applied/)
+    expect(text).toMatch(/read the record/)
+    expect(requests).toHaveLength(1)
+  })
+
+  test('ELVANTO_MCP_WRITES is read, and a typo fails fast', () => {
+    expect(configFromEnv({}).writes).toBe('off')
+    expect(configFromEnv({ ELVANTO_MCP_WRITES: 'ALL' }).writes).toBe('all')
+    expect(() => configFromEnv({ ELVANTO_MCP_WRITES: 'yes' })).toThrow(/ELVANTO_MCP_WRITES/)
   })
 })

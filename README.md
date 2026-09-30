@@ -13,9 +13,10 @@ church management API:
 | [`@criticalcodes/elvanto-mcp`](packages/elvanto-mcp) | MCP server, for LLM tools | `npx @criticalcodes/elvanto-mcp` |
 | [`@criticalcodes/elvanto-agent`](packages/elvanto-agent) | Agent toolkit for [Flue](https://flueframework.com) | `npm i @criticalcodes/elvanto-agent` |
 
-This version covers **API key and OAuth 2 authentication** and **read-only
-endpoints** — all 25 of them. Mutations are designed for but not implemented; see
-[Roadmap](#roadmap).
+This version covers **API key and OAuth 2 authentication**, **every read
+endpoint** — all 25 — and **writes for people, groups and People Flow steps**.
+Writes are off by default on the model-facing surfaces; see
+[Writes](packages/elvanto-mcp/README.md#writes).
 
 > Unofficial. Not affiliated with or endorsed by Elvanto.
 
@@ -460,10 +461,11 @@ Three things worth knowing before deploying:
 
 Deliberately not in this version:
 
-- **Mutations.** `create`, `edit`, `remove`, `addPerson` and the rest. The
-  registry has no `method` field yet because every endpoint here is a POST that
-  reads; adding writes should also add an explicit opt-in, so an MCP server
-  cannot be handed the ability to delete a person by accident.
+- **Song, calendar and financial writes.** Songs and calendar events are next.
+  Financial writes (transactions, chart of accounts) are deliberately left out.
+- **Writes from the agent toolkit.** It stays read-only: its endpoint presets
+  and selections are typed to read endpoints, so a write cannot be mounted by
+  accident.
 - **Anything outbound from the agent.** The toolkit reads and reports; it sends no
   email or SMS. Notifying people is a mutation of the world rather than of Elvanto,
   and it should be an explicit, separately-authorised step rather than something a

@@ -639,3 +639,69 @@ describe('render', () => {
     expect(output).not.toContain('null')
   })
 })
+
+describe('writes', () => {
+  /** Runs with stdin reported as not a terminal, as in a script or CI. */
+  async function runUnattended(...args: string[]): Promise<number> {
+    const descriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true })
+    try {
+      return await run(...args)
+    } finally {
+      if (descriptor) Object.defineProperty(process.stdin, 'isTTY', descriptor)
+      else delete (process.stdin as { isTTY?: boolean }).isTTY
+    }
+  }
+
+  test('a write runs without confirmation and prints the acknowledgement', async () => {
+    responses['people/create'] = { status: 'ok', person: { id: 'p-new', family_id: 3 } }
+
+    const code = await runUnattended(
+      'people', 'create', '--firstname', 'Ada', '--lastname', 'Lovelace', '-o', 'json',
+    )
+
+    expect(code).toBe(EXIT.ok)
+    expect(server.requests[0]!.body).toEqual({ firstname: 'Ada', lastname: 'Lovelace' })
+    expect(JSON.parse(out())).toEqual({ id: 'p-new', family_id: 3 })
+  })
+
+  test('a destructive command refuses to run unattended without --yes', async () => {
+    responses['people/remove'] = { status: 'ok', person: { id: 'p' } }
+
+    const code = await runUnattended('people', 'remove', '--id', 'p')
+
+    expect(code).toBe(EXIT.usage)
+    expect(err()).toContain('--yes')
+    expect(server.requests).toHaveLength(0)
+  })
+
+  test('--yes confirms a destructive command', async () => {
+    responses['people/remove'] = { status: 'ok', person: { id: 'p' } }
+
+    const code = await runUnattended('people', 'remove', '--id', 'p', '--yes', '-o', 'json')
+
+    expect(code).toBe(EXIT.ok)
+    expect(server.requests[0]!.path).toBe('people/remove')
+  })
+
+  test('a failed write is not retried, and exits with its own code', async () => {
+    responses['groups/addPerson'] = httpResponse({
+      status: 502,
+      body: { status: 'fail', error: { message: 'Bad Gateway' } },
+    })
+
+    const code = await runUnattended(
+      'groups', 'add-person', '--id', 'g', '--person-id', 'p', '--retries', '3',
+    )
+
+    expect(code).toBe(EXIT.outcomeUnknown)
+    expect(err()).toMatch(/may or may not have been applied/)
+    expect(server.requests).toHaveLength(1)
+  })
+
+  test('the endpoint listing marks writes', async () => {
+    await main(['node', 'elvanto', 'endpoints'])
+    expect(out()).toMatch(/people remove\s+Delete a person\. \[destructive\]/)
+    expect(out()).toMatch(/people create\s+Create a person\. \[write\]/)
+  })
+})

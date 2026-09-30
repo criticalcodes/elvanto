@@ -2,7 +2,7 @@
 
 An [MCP](https://modelcontextprotocol.io) server that exposes the
 [Elvanto](https://www.elvanto.com) church management API to an LLM as tools.
-Read-only: no tool can modify your Elvanto data.
+Read-only by default; tools that change the account are an explicit opt-in.
 
 > Unofficial. Not affiliated with or endorsed by Elvanto.
 
@@ -95,7 +95,7 @@ app.all('/mcp', (c) => handler(c.req.raw))
 
 ## Tools
 
-25 tools, one per read-only endpoint, named in snake_case:
+By default, 25 tools, one per read-only endpoint, named in snake_case:
 
 ```
 elvanto_people_get_all                    elvanto_songs_get_all
@@ -119,7 +119,9 @@ elvanto_services_get_info
 Each is generated from the same endpoint registry as the `@criticalcodes/elvanto` SDK, so its
 input schema is exactly the endpoint's documented parameters, and its description
 carries Elvanto's own guidance plus a link to the relevant documentation page.
-All are annotated `readOnlyHint: true`.
+Read tools are annotated `readOnlyHint: true`; write tools carry
+`readOnlyHint: false`, and `destructiveHint: true` where they delete or discard
+data, so a client can ask before calling them.
 
 Things a model would otherwise get wrong are stated in the descriptions: that
 `elvanto_services_get_all` returns only upcoming services unless asked otherwise,
@@ -210,12 +212,26 @@ you connect it to a model:
   statuses and timings. Logs go to stderr, so they can't corrupt the stdio
   protocol channel.
 
-## Scope
+## Writes
 
-Read-only. Mutating endpoints (`create`, `edit`, `remove`, `addPerson`) are not
-exposed, and when they are added they will require an explicit opt-in — an MCP
-server shouldn't gain the ability to delete a person as a side effect of an
-upgrade.
+Off unless `ELVANTO_MCP_WRITES` says otherwise, so a server set up before writes
+existed does not gain them on upgrade:
+
+| `ELVANTO_MCP_WRITES` | Adds |
+| --- | --- |
+| `off` (default) | nothing — reads only |
+| `write` | `people_create`, `groups_create`, `groups_edit`, `groups_add_person`, `people_flows_steps_add_person` |
+| `all` | also `people_edit`, `people_remove`, `groups_remove`, `groups_remove_person` |
+
+`people_edit` sits with the destructive tools because a blank `family_id` detaches
+a person from their family. A tool that is not enabled is not just unlisted — a
+call to it by name is refused. The server says on startup when writes are on.
+
+A write is never retried after a timeout, a dropped connection or a 5xx, because
+any of those can follow Elvanto having made the change. The tool result says the
+outcome is unknown and tells the model to read the record before trying again.
+
+The write endpoints' responses have not yet been checked against a real account.
 
 ## License
 

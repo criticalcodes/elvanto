@@ -5,6 +5,7 @@ import {
   endpointIds,
   endpoints,
   getEndpoint,
+  readEndpointIds,
   type EndpointDefinition,
 } from '../src/registry.js'
 import { toCliPath, toKebabCase, toMcpToolName, toSnakeCase } from '../src/naming.js'
@@ -64,14 +65,35 @@ describe('registry integrity', () => {
     }
   })
 
-  test('every endpoint is read-only', () => {
-    for (const endpoint of Object.values(endpoints)) {
+  test('an endpoint reads exactly when its name says it reads', () => {
+    // The effect decides what a model is allowed to call, so a write mislabelled
+    // as a read would slip past every opt-in. The action name is the independent
+    // check: Elvanto's read verbs are a small closed set.
+    const readVerbs = ['getAll', 'getInfo', 'search', 'currentUser', 'people']
+    const all: EndpointDefinition[] = Object.values(endpoints)
+    for (const endpoint of all) {
       const action = endpoint.id.split('.').pop()!
-      expect(
-        ['getAll', 'getInfo', 'search', 'currentUser', 'people'],
-        `${endpoint.id} looks like a mutation`,
-      ).toContain(action)
+      expect(endpoint.effect === 'read', endpoint.id).toBe(readVerbs.includes(action))
     }
+  })
+
+  test('records exactly which endpoints are destructive', () => {
+    // Pinned: moving an endpoint out of this list lets a model reach it under
+    // ELVANTO_MCP_WRITES=write, so that has to be a decision, not a side effect.
+    const all: EndpointDefinition[] = Object.values(endpoints)
+    const destructive = all.filter((e) => e.effect === 'destructive').map((e) => e.id).sort()
+    expect(destructive).toEqual([
+      'groups.remove',
+      'groups.removePerson',
+      // A blank family_id detaches the person from their family.
+      'people.edit',
+      'people.remove',
+    ])
+  })
+
+  test('readEndpointIds holds the reads and nothing else', () => {
+    expect(readEndpointIds.length).toBe(25)
+    for (const id of readEndpointIds) expect(getEndpoint(id).effect, id).toBe('read')
   })
 
   test('every endpoint documents itself', () => {
@@ -121,8 +143,19 @@ describe('registry integrity', () => {
       'financial.categories.getAll',
       'financial.transactions.getAll',
       'financial.transactions.getInfo',
-      // Requires OAuth, which is not implemented yet.
+      // Writes (groups.*, people.create/edit/remove, peopleFlows.steps.addPerson)
+      // have not yet been exercised against a real account.
+      'groups.addPerson',
+      'groups.create',
+      'groups.edit',
+      'groups.remove',
+      'groups.removePerson',
+      'people.create',
+      // Requires OAuth, which has not been exercised live either.
       'people.currentUser',
+      'people.edit',
+      'people.remove',
+      'peopleFlows.steps.addPerson',
       // The endpoint answered, but no member records existed to shape-check.
       'peopleFlows.steps.people',
       // No songs in the account swept, so nothing downstream could be reached.

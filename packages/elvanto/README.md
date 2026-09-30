@@ -1,6 +1,6 @@
 # @criticalcodes/elvanto
 
-Typed, read-only TypeScript client for the [Elvanto](https://www.elvanto.com)
+Typed TypeScript client for the [Elvanto](https://www.elvanto.com)
 church management API.
 
 > Unofficial. Not affiliated with or endorsed by Elvanto.
@@ -63,13 +63,13 @@ Two things about Elvanto's flow specifically:
 
 - **No PKCE.** Exchanging a code requires the client secret, so there is no safe
   public client. Register your own application under Settings → Integrations.
-- **No read-only scope.** All seven scopes are write-capable. This library issues
-  only reads, but a token it holds can do more; `DEFAULT_SCOPES` omits
+- **No read-only scope.** All seven scopes are write-capable, so a token can do
+  more than any one caller uses; `DEFAULT_SCOPES` omits
   `ManageFinancials` and `AdministerAccount`.
 
 ## Endpoints
 
-Namespaced to mirror the API. All 25 read-only endpoints:
+Namespaced to mirror the API. The 25 read-only endpoints:
 
 ```ts
 elvanto.people.getAll(params?)                  elvanto.songs.getAll(params?)
@@ -89,6 +89,24 @@ elvanto.groups.getInfo({ id })                  elvanto.financial.transactions.g
 elvanto.services.getAll(params?)
 elvanto.services.getInfo({ id })
 ```
+
+And the writes, which return Elvanto's acknowledgement (usually just the id):
+
+```ts
+elvanto.people.create({ firstname, lastname, ... })   elvanto.groups.create({ name, ... })
+elvanto.people.edit({ id, ... })                      elvanto.groups.edit({ id, ... })
+elvanto.people.remove({ id })                         elvanto.groups.remove({ id })
+elvanto.peopleFlows.steps.addPerson({ step_id, person_id })
+elvanto.groups.addPerson({ id, person_id, position? })
+elvanto.groups.removePerson({ id, person_id })
+```
+
+A write is never retried after a timeout, dropped connection or 5xx — any of
+those can follow Elvanto having made the change. It throws
+`ElvantoWriteOutcomeUnknownError` instead; read the record before trying again.
+An acknowledgement that does not match its schema is reported as a warning, never
+thrown, since by then the write has happened. Each endpoint's `effect` in the
+registry (`read`, `write`, `destructive`) says what it does.
 
 Or reach any of them dynamically, still fully typed:
 
@@ -266,8 +284,9 @@ rather than being caught locally.
 
 ## Scope
 
-Read-only, with API key or OAuth 2 authentication. Mutating endpoints are not
-implemented yet.
+Reads, plus writes for people, groups and People Flow steps, with API key or
+OAuth 2 authentication. Song, calendar and financial writes are not implemented
+yet.
 
 ## License
 

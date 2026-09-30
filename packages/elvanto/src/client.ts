@@ -4,6 +4,7 @@ import {
   ElvantoError,
   ElvantoRequestValidationError,
   ElvantoResponseValidationError,
+  type ElvantoWriteOutcomeUnknownError,
   type ValidationIssue,
 } from './errors.js'
 import {
@@ -17,6 +18,7 @@ import { isEmptySingle, pageSchema, singleSchema, type Page } from './normalize.
 import {
   endpoints,
   getEndpoint,
+  isWriteEndpoint,
   type EndpointDefinition,
   type EndpointId,
   type EndpointRegistry,
@@ -39,7 +41,7 @@ export interface PaginateOptions extends RequestOptions {
 }
 
 /**
- * A typed, read-only client for the Elvanto API.
+ * A typed client for the Elvanto API.
  *
  * ```ts
  * const client = new ElvantoClient({ auth: { apiKey: process.env.ELVANTO_API_KEY! } })
@@ -49,6 +51,10 @@ export interface PaginateOptions extends RequestOptions {
  * Every method is a thin binding over {@link call}, which resolves the endpoint
  * in the registry, validates parameters, normalizes the response and applies the
  * configured validation mode.
+ *
+ * Write methods (`create`, `edit`, `remove`, `addPerson`, …) are never retried
+ * after a failure that may have followed the write; they throw
+ * {@link ElvantoWriteOutcomeUnknownError} instead. See the registry's `effect`.
  */
 export class ElvantoClient {
   private readonly transport: Transport
@@ -99,7 +105,9 @@ export class ElvantoClient {
       ? { ...(parsedParams.data as Record<string, unknown>), ...options.extraParams }
       : (parsedParams.data as Record<string, unknown>)
 
-    const envelope = await this.transport.request(endpoint.path, body, options)
+    const envelope = await this.transport.request(endpoint.path, body, options, {
+      write: isWriteEndpoint(endpoint),
+    })
 
     const mode = options.validate ?? this.defaultValidate
     const result = this.extract(id, endpoint, envelope, mode) as ResultOf<K>
@@ -111,11 +119,16 @@ export class ElvantoClient {
         level: 'debug',
         event: 'result',
         endpoint: id,
-        message: endpoint.result.kind === 'page' ? 'page' : 'record',
+        message:
+          endpoint.result.kind === 'page'
+            ? 'page'
+            : endpoint.result.kind === 'ack'
+              ? 'ack'
+              : 'record',
         data:
           endpoint.result.kind === 'page'
             ? { returned: page.items.length, total: page.total, page: page.page, hasMore: page.hasMore }
-            : { validate: mode },
+            : { validate: mode, effect: endpoint.effect },
       })
     }
 
@@ -244,6 +257,8 @@ export class ElvantoClient {
       }
     }
 
+    if (shape.kind === 'ack') return this.extractAck(id, shape, envelope, mode)
+
     const raw = envelope[shape.key]
     if (isEmptySingle(raw)) {
       throw new ElvantoApiError({
@@ -261,6 +276,60 @@ export class ElvantoClient {
 
     this.report(id, mode, toIssues(result.error, shape.key), raw)
     return structural.parse(raw)
+  }
+
+  /**
+   * Reads a write's acknowledgement.
+   *
+   * Never throws. By now Elvanto has accepted the write, and an exception would
+   * tell the caller it failed — inviting a retry that applies it twice. So a
+   * mismatch is downgraded to a warning under `throw`, and the raw payload is
+   * returned for the caller to inspect.
+   *
+   * Falls back to the payload's one non-envelope key when the documented key is
+   * missing, since at least one example (`groups/remove`) documents the wrong
+   * one. With no payload at all, returns an empty object: the write succeeded
+   * and there is nothing more to say.
+   */
+  private extractAck(
+    id: string,
+    shape: Extract<EndpointDefinition['result'], { kind: 'ack' }>,
+    envelope: Record<string, unknown>,
+    mode: ValidationMode,
+  ): unknown {
+    const payloadKeys = Object.keys(envelope).filter(
+      (key) => key !== 'status' && key !== 'generated_in',
+    )
+    const key =
+      shape.key in envelope
+        ? shape.key
+        : payloadKeys.length === 1
+          ? payloadKeys[0]!
+          : undefined
+    if (key === undefined) {
+      if (payloadKeys.length > 0) {
+        this.report(id, softened(mode), [
+          {
+            path: shape.key,
+            message: `expected "${shape.key}" in the acknowledgement, got keys: ${payloadKeys.join(', ')}`,
+          },
+        ], envelope)
+      }
+      return {}
+    }
+
+    const raw = envelope[key]
+    if (mode === 'off') return raw
+
+    const result = shape.item.safeParse(raw)
+    if (result.success) return result.data
+    // Elvanto wraps some single records in a one-element array.
+    if (Array.isArray(raw) && raw.length === 1) {
+      const inner = shape.item.safeParse(raw[0])
+      if (inner.success) return inner.data
+    }
+    this.report(id, softened(mode), toIssues(result.error, key), raw)
+    return raw
   }
 
   /** Raises or reports a response-shape mismatch according to the mode. */
@@ -311,6 +380,12 @@ export class ElvantoClient {
       this.call('people.search', params, options),
     getInfo: (params: ParamsOf<'people.getInfo'>, options?: RequestOptions) =>
       this.call('people.getInfo', params, options),
+    create: (params: ParamsOf<'people.create'>, options?: RequestOptions) =>
+      this.call('people.create', params, options),
+    edit: (params: ParamsOf<'people.edit'>, options?: RequestOptions) =>
+      this.call('people.edit', params, options),
+    remove: (params: ParamsOf<'people.remove'>, options?: RequestOptions) =>
+      this.call('people.remove', params, options),
     /** OAuth only — throws when the client is authenticated with an API key. */
     currentUser: (options?: RequestOptions) =>
       this.call('people.currentUser', {}, options),
@@ -336,6 +411,10 @@ export class ElvantoClient {
         params: ParamsOf<'peopleFlows.steps.people'>,
         options?: RequestOptions,
       ) => this.call('peopleFlows.steps.people', params, options),
+      addPerson: (
+        params: ParamsOf<'peopleFlows.steps.addPerson'>,
+        options?: RequestOptions,
+      ) => this.call('peopleFlows.steps.addPerson', params, options),
     },
   } as const
 
@@ -344,6 +423,18 @@ export class ElvantoClient {
       this.call('groups.getAll', params, options),
     getInfo: (params: ParamsOf<'groups.getInfo'>, options?: RequestOptions) =>
       this.call('groups.getInfo', params, options),
+    create: (params: ParamsOf<'groups.create'>, options?: RequestOptions) =>
+      this.call('groups.create', params, options),
+    edit: (params: ParamsOf<'groups.edit'>, options?: RequestOptions) =>
+      this.call('groups.edit', params, options),
+    remove: (params: ParamsOf<'groups.remove'>, options?: RequestOptions) =>
+      this.call('groups.remove', params, options),
+    addPerson: (params: ParamsOf<'groups.addPerson'>, options?: RequestOptions) =>
+      this.call('groups.addPerson', params, options),
+    removePerson: (
+      params: ParamsOf<'groups.removePerson'>,
+      options?: RequestOptions,
+    ) => this.call('groups.removePerson', params, options),
   } as const
 
   readonly services = {
@@ -420,6 +511,11 @@ export class ElvantoClient {
 /** Convenience factory, for `createClient({ apiKey })` over `new`. */
 export function createClient(options: ElvantoClientOptions = {}): ElvantoClient {
   return new ElvantoClient(options)
+}
+
+/** `throw` becomes `warn`; see {@link ElvantoClient.extractAck}. */
+function softened(mode: ValidationMode): ValidationMode {
+  return mode === 'throw' ? 'warn' : mode
 }
 
 function emptyPage(): Page<never> {

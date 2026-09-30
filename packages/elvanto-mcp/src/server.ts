@@ -12,6 +12,7 @@ import {
   ElvantoRequestValidationError,
   ElvantoResponseValidationError,
   ElvantoTransportError,
+  ElvantoWriteOutcomeUnknownError,
   endpointIds,
   getEndpoint,
   isPageEndpoint,
@@ -29,6 +30,7 @@ import {
   type DebugMode,
   type ElvantoClientOptions,
   type EndpointDefinition,
+  type EndpointId,
   type ValidationMode,
 } from '@criticalcodes/elvanto'
 
@@ -47,8 +49,41 @@ export const DEFAULT_PAGE_SIZE = SHARED_DEFAULT_PAGE_SIZE
 export const DEFAULT_MAX_RESPONSE_CHARS = SHARED_MAX_RESPONSE_CHARS
 export const MIN_MAX_RESPONSE_CHARS = SHARED_MIN_RESPONSE_CHARS
 
+/**
+ * Which writes the server exposes.
+ *
+ * - `off` (default) — reads only. Write tools are not listed and cannot be
+ *   called, so a server configured before writes existed does not gain them.
+ * - `write` — adds creates, edits and memberships that another call can undo.
+ * - `all` — adds the destructive ones too: deleting people and groups, removing
+ *   memberships, and `people.edit`, which can detach a person from a family.
+ */
+export type WriteLevel = 'off' | 'write' | 'all'
+
+/** Parses `ELVANTO_MCP_WRITES`. Absent means `off`; anything unknown throws. */
+export function parseWriteLevel(value: string | undefined): WriteLevel {
+  if (value == null || value.trim() === '') return 'off'
+  const v = value.trim().toLowerCase()
+  if (v === 'off' || v === 'write' || v === 'all') return v
+  throw new ElvantoError(
+    `Invalid write level "${value}". Expected "off", "write" or "all".`,
+  )
+}
+
+/** The endpoints exposed at a write level. */
+export function exposedEndpointIds(level: WriteLevel): EndpointId[] {
+  return endpointIds.filter((id) => {
+    const { effect } = getEndpoint(id)
+    if (effect === 'read') return true
+    if (effect === 'write') return level !== 'off'
+    return level === 'all'
+  })
+}
+
 export interface ServerConfig {
   clientOptions?: ElvantoClientOptions
+  /** Which writes to expose. Default `off`. */
+  writes?: WriteLevel
   defaultPageSize?: number
   maxResponseChars?: number
   /** Build the client lazily so the server starts without credentials. */
@@ -68,6 +103,9 @@ export function configFromEnv(
   const debug: DebugMode | undefined = attributeTo('ELVANTO_DEBUG', () =>
     parseDebugMode(env['ELVANTO_DEBUG']),
   )
+  const writes = attributeTo('ELVANTO_MCP_WRITES', () =>
+    parseWriteLevel(env['ELVANTO_MCP_WRITES']),
+  )
   const pageSize = positiveInt(env['ELVANTO_MCP_PAGE_SIZE'])
   const maxChars = positiveInt(env['ELVANTO_MCP_MAX_RESPONSE_CHARS'])
 
@@ -82,6 +120,7 @@ export function configFromEnv(
         process.stderr.write(`[elvanto-mcp] ${warning.message}\n`)
       },
     },
+    writes,
     ...(pageSize !== undefined ? { defaultPageSize: pageSize } : {}),
     ...(maxChars !== undefined ? { maxResponseChars: maxChars } : {}),
   }
@@ -103,24 +142,39 @@ function positiveInt(value: string | undefined): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
-/** The tool definitions advertised to the client, one per read-only endpoint. */
-export function buildTools(defaultPageSize = DEFAULT_PAGE_SIZE): Tool[] {
-  return endpointIds.map((id) => {
+/** The tool definitions advertised to the client, one per exposed endpoint. */
+export function buildTools(
+  defaultPageSize = DEFAULT_PAGE_SIZE,
+  writes: WriteLevel = 'off',
+): Tool[] {
+  return exposedEndpointIds(writes).map((id) => {
     const endpoint = getEndpoint(id)
     return {
       name: toMcpToolName(id),
       description: toolDescription(endpoint, defaultPageSize),
       inputSchema: paramsJsonSchema(endpoint) as Tool['inputSchema'],
-      annotations: {
-        title: endpoint.summary,
-        readOnlyHint: true,
-        // Nothing here mutates Elvanto, so a repeat call is always safe.
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: true,
-      },
+      annotations: { title: endpoint.summary, ...hintsFor(endpoint), openWorldHint: true },
     }
   })
+}
+
+/**
+ * MCP's behaviour hints, from the endpoint's effect. Clients use these to decide
+ * what to ask the user before calling.
+ *
+ * Only reads are idempotent. `edit` and `addPerson` would repeat harmlessly in
+ * isolation, but not after someone else's change in between, and a hint that
+ * invites automatic retries is the wrong default for a write.
+ */
+function hintsFor(endpoint: EndpointDefinition): Tool['annotations'] {
+  switch (endpoint.effect) {
+    case 'read':
+      return { readOnlyHint: true, destructiveHint: false, idempotentHint: true }
+    case 'write':
+      return { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
+    case 'destructive':
+      return { readOnlyHint: false, destructiveHint: true, idempotentHint: false }
+  }
 }
 
 /**
@@ -147,9 +201,12 @@ export function createServer(config: ServerConfig = {}): Server {
     config.maxResponseChars ?? DEFAULT_MAX_RESPONSE_CHARS,
     MIN_MAX_RESPONSE_CHARS,
   )
-  const tools = buildTools(defaultPageSize)
+  const writes = config.writes ?? 'off'
+  const tools = buildTools(defaultPageSize, writes)
+  // Built from the same filter as the listing, so an unlisted write tool is also
+  // uncallable — a client that guesses its name gets "unknown tool".
   const byToolName = new Map(
-    endpointIds.map((id) => [toMcpToolName(id), getEndpoint(id)]),
+    exposedEndpointIds(writes).map((id) => [toMcpToolName(id), getEndpoint(id)]),
   )
 
   const server = new Server(
@@ -216,6 +273,12 @@ function errorResult(message: string): CallToolResult {
  * to do differently.
  */
 export function describeError(error: unknown): string {
+  if (error instanceof ElvantoWriteOutcomeUnknownError) {
+    return (
+      `${error.message} Tell the user it is unclear whether the change was made, ` +
+      `and read the record to find out before calling this tool again.`
+    )
+  }
   if (error instanceof ElvantoRequestValidationError) {
     return `Invalid arguments. ${error.message}`
   }

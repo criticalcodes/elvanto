@@ -52,6 +52,21 @@ export function endpointToolDescription(
         `page_size to see the rest.`,
     )
   }
+  if (endpoint.effect === 'write') {
+    parts.push(
+      'This changes the Elvanto account. It is not retried automatically; if it ' +
+        'reports that the outcome is unknown, check with a read before calling ' +
+        'it again, or it may be applied twice.',
+    )
+  }
+  if (endpoint.effect === 'destructive') {
+    parts.push(
+      'This can delete or discard data in the Elvanto account, and cannot be ' +
+        'undone by another call. Confirm the exact record with the user first. ' +
+        'It is not retried automatically; if it reports that the outcome is ' +
+        'unknown, check with a read before calling it again.',
+    )
+  }
   if (endpoint.auth === 'oauth-only') {
     parts.push('Requires OAuth; unavailable when authenticated with an API key.')
   }

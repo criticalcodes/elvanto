@@ -22,6 +22,8 @@ export {
   buildTools,
   configFromEnv,
   createServer,
+  exposedEndpointIds,
+  parseWriteLevel,
   toolDescription,
   DEFAULT_MAX_RESPONSE_CHARS,
   DEFAULT_PAGE_SIZE,
@@ -29,4 +31,5 @@ export {
   SERVER_NAME,
   SERVER_VERSION,
   type ServerConfig,
+  type WriteLevel,
 } from './server.js'

@@ -90,6 +90,7 @@ export {
   ElvantoRequestValidationError,
   ElvantoResponseValidationError,
   ElvantoTransportError,
+  ElvantoWriteOutcomeUnknownError,
   type ValidationIssue,
 } from './errors.js'
 
@@ -98,11 +99,15 @@ export {
   endpoints,
   getEndpoint,
   isPageEndpoint,
+  isWriteEndpoint,
+  readEndpointIds,
   type EndpointDefinition,
+  type EndpointEffect,
   type EndpointId,
   type EndpointRegistry,
   type PageEndpointId,
   type ParamsOf,
+  type ReadEndpointId,
   type RecordOf,
   type ResultShape,
 } from './registry.js'
@@ -239,3 +244,14 @@ export {
   type PeopleFlowStepMember,
   type PeopleFlowStepSummary,
 } from './schemas/peopleFlows.js'
+
+export {
+  groupAckSchema,
+  groupMemberAckSchema,
+  personAckSchema,
+  stepPersonAckSchema,
+  type GroupAck,
+  type GroupMemberAck,
+  type PersonAck,
+  type StepPersonAck,
+} from './schemas/writes.js'

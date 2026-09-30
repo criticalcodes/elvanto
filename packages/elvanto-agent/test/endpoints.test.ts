@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import * as v from 'valibot'
 import { toJsonSchema } from '@valibot/to-json-schema'
-import { describeParams, endpointIds, getEndpoint, toMcpToolName } from '@criticalcodes/elvanto'
+import { describeParams, endpointIds, getEndpoint, readEndpointIds, toMcpToolName } from '@criticalcodes/elvanto'
 import { buildTools } from '@criticalcodes/elvanto-mcp'
 import {
   ALL_ENDPOINTS,
@@ -20,7 +20,7 @@ describe('generated endpoint tools', () => {
     const native = endpointTools({ client: stubClient(() => ({})).client }, 'all')
     const mcp = buildTools().map((tool) => tool.name)
 
-    expect(native.length).toBe(endpointIds.length)
+    expect(native.length).toBe(readEndpointIds.length)
     expect(native.map((tool) => tool.name).sort()).toEqual([...mcp].sort())
   })
 

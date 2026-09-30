@@ -1,7 +1,7 @@
 # @criticalcodes/elvanto-cli
 
 Command-line access to the [Elvanto](https://www.elvanto.com) church management
-API. Read-only.
+API.
 
 > Unofficial. Not affiliated with or endorsed by Elvanto.
 
@@ -215,9 +215,30 @@ elvanto people get-all --params-json '{"some_new_filter":"x"}'
 
 Unrecognised keys skip local validation and go straight to Elvanto.
 
-## Scope
+## Writes
 
-Read-only. No command can modify your Elvanto data.
+People and groups can be created, changed and deleted, and people added to groups
+and People Flow steps:
+
+```console
+elvanto people create --firstname Ada --lastname Lovelace
+elvanto groups add-person --id "$group" --person-id "$person" --position Leader
+elvanto people edit --id "$person" --params-json '{"fields":{"gender":"Female"}}'
+```
+
+`elvanto endpoints` marks each command `[write]` or `[destructive]`. Destructive
+ones — `people remove`, `people edit`, `groups remove`, `groups remove-person` —
+ask before running, and refuse to run unattended unless given `--yes`.
+(`people edit` is on the list because a blank `family_id` takes a person out of
+their family.)
+
+Writes are never retried after a timeout, a dropped connection or a 5xx: any of
+those can arrive after Elvanto made the change, and repeating a `create` makes a
+second person. The CLI exits with code 6 instead, meaning *the outcome is
+unknown — check before trying again*. Only a 429 is retried, since Elvanto sends
+it before doing anything.
+
+The write endpoints' responses have not yet been checked against a real account.
 
 ## License
 

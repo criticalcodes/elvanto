@@ -2,6 +2,7 @@ import {
   ElvantoApiError,
   ElvantoError,
   ElvantoTransportError,
+  ElvantoWriteOutcomeUnknownError,
   type ValidationIssue,
 } from './errors.js'
 import { envelopeSchema, type Envelope } from './normalize.js'
@@ -303,11 +304,33 @@ export class Transport {
    *
    * @param endpoint API path without extension or leading slash, e.g. `people/getAll`.
    * @param params JSON body. Undefined values are stripped.
+   * @param policy `write: true` for a request that changes the account. Such a
+   *   request is only retried after a 429, and any failure that may have
+   *   happened after Elvanto acted surfaces as
+   *   {@link ElvantoWriteOutcomeUnknownError}.
    */
   async request(
     endpoint: string,
     params: Record<string, unknown> = {},
     options: RequestOptions = {},
+    policy: { write?: boolean } = {},
+  ): Promise<Envelope> {
+    if (!policy.write) return this.send(endpoint, params, options, false)
+    try {
+      return await this.send(endpoint, params, options, true)
+    } catch (error) {
+      if (outcomeUnknown(error)) {
+        throw new ElvantoWriteOutcomeUnknownError({ endpoint, cause: error })
+      }
+      throw error
+    }
+  }
+
+  private async send(
+    endpoint: string,
+    params: Record<string, unknown>,
+    options: RequestOptions,
+    write: boolean,
   ): Promise<Envelope> {
     const url = `${this.options.baseUrl}/${endpoint}.json`
     const body = JSON.stringify(stripUndefined(params))
@@ -388,7 +411,9 @@ export class Transport {
             data: { durationMs: Date.now() - startedAt, attempt: attempt + 1 },
           })
         }
-        if (attempt === this.options.maxRetries) throw lastError
+        // The request may have reached Elvanto before the connection failed, so
+        // a write is never sent again.
+        if (write || attempt === this.options.maxRetries) throw lastError
         continue
       }
       dispose()
@@ -413,7 +438,10 @@ export class Transport {
         })
       }
 
-      if (isRetryableStatus(response.status) && attempt < this.options.maxRetries) {
+      if (
+        isRetryableStatus(response.status, write) &&
+        attempt < this.options.maxRetries
+      ) {
         lastError = response
         continue
       }
@@ -525,8 +553,29 @@ function describeCause(cause: unknown, timeoutMs: number): string {
   return String(cause)
 }
 
-function isRetryableStatus(status: number): boolean {
-  return status === 429 || status === 408 || (status >= 500 && status <= 599)
+/**
+ * Whether a status is worth another attempt.
+ *
+ * A 429 means Elvanto refused before doing anything, so it is safe to repeat
+ * even for a write. A 408 or 5xx may arrive after the work was done.
+ */
+function isRetryableStatus(status: number, write: boolean): boolean {
+  if (status === 429) return true
+  if (write) return false
+  return status === 408 || (status >= 500 && status <= 599)
+}
+
+/**
+ * Whether a failed write may nonetheless have been applied: the connection
+ * failed or timed out, or Elvanto answered with a status that can follow the
+ * work rather than precede it.
+ */
+function outcomeUnknown(error: unknown): boolean {
+  if (error instanceof ElvantoTransportError) return true
+  if (error instanceof ElvantoApiError) {
+    return error.httpStatus === 408 || (error.httpStatus >= 500 && error.httpStatus <= 599)
+  }
+  return false
 }
 
 /** Elvanto's `generated_in` field, for a log line. Absent on non-JSON bodies. */
