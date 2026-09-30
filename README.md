@@ -13,8 +13,8 @@ church management API:
 | [`@criticalcodes/elvanto-mcp`](packages/elvanto-mcp) | MCP server, for LLM tools | `npx @criticalcodes/elvanto-mcp` |
 | [`@criticalcodes/elvanto-agent`](packages/elvanto-agent) | Agent toolkit for [Flue](https://flueframework.com) | `npm i @criticalcodes/elvanto-agent` |
 
-This version covers **API key authentication** and **read-only endpoints** — all
-25 of them. OAuth and mutations are designed for but not implemented; see
+This version covers **API key and OAuth 2 authentication** and **read-only
+endpoints** — all 25 of them. Mutations are designed for but not implemented; see
 [Roadmap](#roadmap).
 
 > Unofficial. Not affiliated with or endorsed by Elvanto.
@@ -56,6 +56,93 @@ leaking Elvanto's camelCase paths:
 Adding an endpoint means adding one registry entry and one binding line in
 `client.ts`. The CLI, the MCP server and the agent's endpoint tools pick it up with
 no further work.
+
+## Authentication
+
+Two ways in, and which one you want depends on whether "who is asking" matters.
+
+**An API key** identifies the *account*. One secret, no expiry, read access to
+every member record and every giving record. Right for a script, a cron job, or a
+server-side integration where there is no user to speak of.
+
+```console
+$ ELVANTO_API_KEY=$(op read "op://Private/Elvanto/api key") elvanto people get-all
+```
+
+**OAuth 2** identifies a *person*. Each caller signs in themselves, the library
+acts with their permissions, and `people.currentUser` starts working. Right for
+anything with more than one human in front of it — and required if you are
+deploying the agent, because otherwise every visitor shares one all-seeing key.
+
+```console
+$ elvanto login          # opens a browser, stores the grant
+$ elvanto whoami
+Using: stored grant (profile "default")
+Signed in as: Ada Lovelace
+```
+
+Once a grant is stored, the CLI and the MCP server use it and refresh it on their
+own; no secrets need to stay in the environment.
+
+> **Not yet exercised against a live Elvanto account.** The OAuth flow, token
+> refresh and the agent's sign-in routes are covered by tests against Elvanto's
+> documented behaviour only. Treat it as unverified until someone has signed in
+> for real; the API key path is the one that has been used live.
+
+### Registering an OAuth application
+
+There is no shared client id here, and there cannot be: **Elvanto's flow has no
+PKCE**, so exchanging an authorization code requires the client secret. A public
+client would mean publishing that secret. So each deployment registers its own
+application under **Settings > Integrations** in Elvanto, and configures:
+
+| Variable | Needed by | When |
+| --- | --- | --- |
+| `ELVANTO_CLIENT_ID` | CLI, agent | Signing in |
+| `ELVANTO_CLIENT_SECRET` | CLI, agent | Signing in |
+| `ELVANTO_SESSION_SECRET` | agent | Always — signs the OAuth `state` |
+
+Register the redirect URI to match the surface:
+
+| Surface | Redirect URI |
+| --- | --- |
+| `elvanto login` | `http://127.0.0.1:8975/callback` (`--port` to change) |
+| Deployed agent | `https://<your-origin>/auth/callback` |
+| Agent under `vite dev` | `http://localhost:5173/auth/callback` |
+
+The client secret is only needed for `login` itself. Elvanto's refresh request
+carries just the grant type and the refresh token, so day-to-day commands need
+nothing in the environment at all.
+
+### Scopes are write-shaped
+
+Worth being plain about, because it cuts against the intuition that OAuth is the
+safer option in every respect. Elvanto's entire scope list is `ManagePeople`,
+`ManageGroups`, `ManageServices`, `ManageSongs`, `ManageCalendar`,
+`ManageFinancials` and `AdministerAccount`. **There is no read-only scope.**
+
+This library only ever issues reads — there are no write endpoints in it — but a
+token it holds is capable of more than it does with it. The default requests the
+first five, omitting financials and account administration, which matches the
+agent toolkit's endpoint allowlist. Narrow it further with `--scope` if your use
+does not need all five.
+
+### Where credentials live
+
+| | Stored | Why there |
+| --- | --- | --- |
+| CLI, MCP server | `~/.config/elvanto/credentials.json`, mode 0600 in a 0700 directory | A refresh token is needed on every command, so prompting each time would mean a browser round trip to list a roster |
+| Deployed agent | Server-side session store, keyed by an opaque httpOnly cookie | Never in the cookie, and never in Flue's durable record log — its own reference says that log "is still not a secrets channel" |
+
+`ELVANTO_CREDENTIALS` overrides the path and `ELVANTO_PROFILE` picks between
+grants, for anyone working across two churches.
+
+Note that this is the one place the repository writes a credential to disk, which
+is a different trade from the API key the smoke test deliberately refuses to
+store: an API key is account-wide and permanent until rotated by hand, while a
+refresh token belongs to one person and can be revoked from Elvanto's own
+settings. `elvanto logout` forgets the local grant; revoking it entirely is done
+under Settings > Integrations.
 
 ## Response normalization
 
@@ -201,7 +288,7 @@ Still `docs`-only, and why:
 | `songs.*` (5) | No songs in the account swept, so nothing downstream was reachable |
 | `financial.*` (3) | No chart of accounts and no transactions. Also where the published examples disagree with each other most |
 | `peopleFlows.steps.people` | The endpoint answered, but no step had members to shape-check |
-| `people.currentUser` | Requires OAuth, which isn't implemented yet |
+| `people.currentUser` | Needs OAuth, which is itself untested live, and the sweep authenticates with an API key, which by design cannot call it |
 
 Within services, the envelope, `service_times` and the whole `volunteers` tree
 were exercised for real; `plans`, `songs`, `files` and `notes` came back empty
@@ -213,7 +300,7 @@ everywhere, so those four remain documentation-only.
 pnpm install
 pnpm build          # all four packages
 pnpm typecheck      # includes compile-time type assertions
-pnpm test           # 381 tests, no network
+pnpm test           # 507 tests, no network
 pnpm test:coverage
 pnpm smoke          # live sweep, needs a real API key
 ```
@@ -331,14 +418,48 @@ useElvantoBase()
 for (const tool of myCredentialTools(profile)) useTool(tool)
 ```
 
+### Deploying the agent
+
+Until now the honest advice was "don't" — the HTTP surface had no access control,
+and behind it is every member record the API key can see. With OAuth configured,
+each visitor signs in as themselves instead:
+
+```ts
+// src/app.ts
+const auth = authOptionsFromEnv({ store: () => sessionStore() })
+export default elvantoRoutes({ agent: Church, title: 'Church office', ...(auth ? { auth } : {}) })
+```
+
+`authOptionsFromEnv` returns `undefined` when no OAuth application is configured,
+so the same route map runs signed-in in production and unauthenticated on a
+laptop — with the existing loud warning in the second case. What it mounts:
+
+- `/auth/login`, `/auth/callback`, `/auth/logout` and `/auth/session`.
+- A guard over the agent mount doing both checks Flue's routing guide insists on:
+  authentication, and the **ownership check** — conversation ids are derived from
+  the signed-in person, so nobody reads anyone else's history by editing a URL.
+- A sign-in page at `/` instead of the chat, for a visitor with no session.
+
+Sessions and grants live in a Durable Object on Cloudflare
+(`createSessionStoreClass()`, exported from `src/cloudflare.ts` with a binding and
+migration in `wrangler.jsonc`) and in a process-local store on Node. A Durable
+Object rather than KV deliberately: it is a token store, and KV's eventual
+consistency would let two concurrent refreshes both win, leaving the loser's
+refresh token spent and the session dead at an arbitrary boundary.
+
+Three things worth knowing before deploying:
+
+- **Only the person's id is durable.** The agent reads it from `initialData` and
+  looks the grant up server-side. Tokens never enter Flue's record log.
+- **A scheduled run has no signed-in user.** Cron-triggered work cannot use anyone's
+  grant, so it either keeps an account-wide API key or does not run.
+- **`/mcp` is not covered by any of this.** MCP hosts carry a bearer token, not a
+  browser cookie, so that route still speaks to Elvanto with the environment's key.
+
 ## Roadmap
 
 Deliberately not in this version:
 
-- **OAuth 2.** The transport already supports bearer tokens and a
-  `getAccessToken` hook for refresh, so the remaining work is the authorization
-  code flow and token storage. `people.currentUser` is registered and will start
-  working the moment a token is supplied.
 - **Mutations.** `create`, `edit`, `remove`, `addPerson` and the rest. The
   registry has no `method` field yet because every endpoint here is a POST that
   reads; adding writes should also add an explicit opt-in, so an MCP server

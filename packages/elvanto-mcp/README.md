@@ -25,6 +25,30 @@ Add it to your MCP client's configuration. For Claude Desktop
 
 Your key is in Elvanto under **Settings → Account Settings → Secret API Key**.
 
+### Or sign in as yourself
+
+An API key identifies the account and reads every member and giving record in it.
+To have the server act as *you* instead, sign in once with the CLI and leave the
+key out of the configuration entirely:
+
+```console
+$ npm install -g @criticalcodes/elvanto-cli
+$ ELVANTO_CLIENT_ID=… ELVANTO_CLIENT_SECRET=… elvanto login
+```
+
+```json
+{
+  "mcpServers": {
+    "elvanto": { "command": "npx", "args": ["-y", "@criticalcodes/elvanto-mcp"] }
+  }
+}
+```
+
+The server picks up the stored grant, refreshes it as needed, and says so on
+startup. `ELVANTO_API_KEY` and `ELVANTO_ACCESS_TOKEN` still win if set — an MCP
+client's configuration names its environment explicitly, so a variable there is a
+current instruction rather than a stale shell export.
+
 Requires Node 20+.
 
 ## Transports
@@ -133,15 +157,19 @@ Failures come back as tool errors (`isError: true`) rather than protocol errors,
 so the model can react, and they say who can fix the problem. An invalid argument
 is the model's to correct; a bad API key is not:
 
-> Elvanto rejected the credentials (Invalid API Key). The server needs a valid
-> ELVANTO_API_KEY. This cannot be fixed by changing the request.
+> Elvanto rejected the credentials (Invalid API Key). Whoever runs this server
+> needs to supply a valid ELVANTO_API_KEY, or sign in again with `elvanto login`
+> if it is using a stored OAuth grant. This cannot be fixed by changing the
+> request, so do not retry it.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ELVANTO_API_KEY` | — | Secret API key. Required. |
-| `ELVANTO_ACCESS_TOKEN` | — | OAuth access token, instead of a key. |
+| `ELVANTO_API_KEY` | — | Secret API key. |
+| `ELVANTO_ACCESS_TOKEN` | — | A fixed OAuth access token, instead of a key. |
+| `ELVANTO_PROFILE` | `default` | Which stored `elvanto login` grant to use. |
+| `ELVANTO_CREDENTIALS` | `~/.config/elvanto/credentials.json` | Where that grant is read from. |
 | `ELVANTO_VALIDATE` | `throw` | `throw`, `warn`, or `off`. See below. |
 | `ELVANTO_MCP_PAGE_SIZE` | `25` | Records per call when unspecified. |
 | `ELVANTO_MCP_MAX_RESPONSE_CHARS` | `100000` | Response size cap. |

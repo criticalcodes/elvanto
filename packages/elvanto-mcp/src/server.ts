@@ -229,8 +229,11 @@ export function describeError(error: unknown): string {
   if (error instanceof ElvantoApiError) {
     if (error.isAuthError) {
       return (
-        `Elvanto rejected the credentials (${error.message}). The server needs a ` +
-        `valid ELVANTO_API_KEY. This cannot be fixed by changing the request.`
+        `Elvanto rejected the credentials (${error.message}). Whoever runs this ` +
+        `server needs to supply a valid ELVANTO_API_KEY, or sign in again with ` +
+        `\`elvanto login\` if it is using a stored OAuth grant — a grant can be ` +
+        `revoked from Elvanto's own settings. This cannot be fixed by changing ` +
+        `the request, so do not retry it.`
       )
     }
     if (error.isNotFound) {

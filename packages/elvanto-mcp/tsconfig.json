@@ -8,7 +8,8 @@
     // on a prior `pnpm build` and reports stale or missing types. Affects
     // typechecking only: at runtime Node resolves the real package.
     "paths": {
-      "@criticalcodes/elvanto": ["../elvanto/src/index.ts"]
+      "@criticalcodes/elvanto": ["../elvanto/src/index.ts"],
+      "@criticalcodes/elvanto/node": ["../elvanto/src/node.ts"]
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]

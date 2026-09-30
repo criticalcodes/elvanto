@@ -48,6 +48,33 @@ export {
 } from './http.js'
 
 export {
+  ELVANTO_SCOPES,
+  DEFAULT_OAUTH_BASE_URL,
+  DEFAULT_EXPIRY_SKEW_MS,
+  DEFAULT_SCOPES,
+  ElvantoOAuthError,
+  MemoryTokenStore,
+  authorizeUrl,
+  createState,
+  createTokenSource,
+  exchangeCode,
+  isExpired,
+  randomToken,
+  readState,
+  refreshTokens,
+  type AuthorizeUrlOptions,
+  type ElvantoScope,
+  type ElvantoTokens,
+  type ExchangeCodeOptions,
+  type ReadStateOptions,
+  type RefreshTokensOptions,
+  type StateOptions,
+  type TokenSource,
+  type TokenSourceOptions,
+  type TokenStore,
+} from './oauth.js'
+
+export {
   createStderrLogger,
   parseDebugMode,
   resolveLogging,

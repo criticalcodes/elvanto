@@ -34,7 +34,13 @@
     // packages at runtime.
     "paths": {
       "@criticalcodes/elvanto": ["../elvanto/src/index.ts"],
-      "@criticalcodes/elvanto-mcp": ["../elvanto-mcp/src/lib.ts"]
+      "@criticalcodes/elvanto/node": ["../elvanto/src/node.ts"],
+      "@criticalcodes/elvanto-mcp": ["../elvanto-mcp/src/lib.ts"],
+      // Both targets satisfy the same interface, so typechecking against either
+      // checks every caller. The Node one is named because it needs no ambient
+      // Cloudflare types; the Cloudflare one is still typechecked on its own, as
+      // a file in `include`.
+      "#sessions": ["./src/sessions.node.ts"]
     }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]

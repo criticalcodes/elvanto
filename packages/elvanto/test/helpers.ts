@@ -40,9 +40,12 @@ export function stubFetch(
       url: String(input),
       method: init?.method ?? 'GET',
       headers,
+      // Parsed when it is JSON, which every data-API call is; kept as the raw
+      // string otherwise, because the OAuth token endpoint is form-encoded and
+      // throwing here would surface as a transport error from the code under test.
       body:
         typeof init?.body === 'string' && init.body.length > 0
-          ? JSON.parse(init.body)
+          ? parseBodyIfJson(init.body)
           : undefined,
     })
 
@@ -61,6 +64,14 @@ export function stubFetch(
   }
 
   return Object.assign(impl, { calls })
+}
+
+function parseBodyIfJson(body: string): unknown {
+  try {
+    return JSON.parse(body)
+  } catch {
+    return body
+  }
 }
 
 /** A client wired to a stub, with retries off unless a test asks for them. */

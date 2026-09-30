@@ -1,7 +1,10 @@
 import { type Agent } from '@flue/runtime'
+import type { TokenSource } from '@criticalcodes/elvanto'
 import { sqlite, start } from '@flue/runtime/node'
 import { stderr, stdout } from 'node:process'
 import { ask, askOnce, chatLoop } from './chat.ts'
+import { runLogin, runLogout, runWhoami, storedGrant } from './auth.ts'
+import { setProcessTokenSource } from '../client.ts'
 import { webChatPage } from './web.ts'
 
 /**
@@ -50,6 +53,20 @@ export interface ElvantoCliOptions {
   envFile?: string | false
   /** Extra subcommands, e.g. a scheduled job worth running by hand. */
   commands?: Record<string, ElvantoCliCommand>
+  /**
+   * The Elvanto credential for this process.
+   *
+   * Defaults to the grant `login` stored, when neither `ELVANTO_API_KEY` nor
+   * `ELVANTO_ACCESS_TOKEN` is set — so signing in once is enough and no secret has
+   * to stay in the environment. Pass a {@link TokenSource} of your own to take the
+   * credential from somewhere else entirely (a secrets manager, a test double), or
+   * `false` to use only what the environment provides.
+   *
+   * Installed process-wide before the agent runs, which is what lets an agent
+   * module that calls `clientFromEnv()` pick it up without being rewritten. See
+   * {@link setProcessTokenSource}.
+   */
+  auth?: TokenSource | false
 }
 
 export interface ElvantoCliCommand {
@@ -117,7 +134,7 @@ export async function runElvantoCli(
   // Without this, `elvanto "who is serving?"` reads its first word as a command
   // name and prints help — which is precisely the friction a bare-message CLI is
   // supposed to remove.
-  const BUILTIN = new Set(['chat', 'help'])
+  const BUILTIN = new Set(['chat', 'help', 'login', 'logout', 'whoami'])
   const first = args.positional[0]
   const isCommand =
     first !== undefined && (BUILTIN.has(first) || first in (options.commands ?? {}))
@@ -127,6 +144,30 @@ export async function runElvantoCli(
   if (args.flags['help'] || args.flags['h'] || command === 'help') {
     stdout.write(help(options))
     return
+  }
+
+  // Before `start()`: none of these needs an agent, and `login` in particular has
+  // to work when there are no credentials at all — which is the whole reason
+  // somebody is running it.
+  if (command === 'login' || command === 'logout' || command === 'whoami') {
+    try {
+      process.exitCode =
+        command === 'login'
+          ? await runLogin(args, process.env)
+          : command === 'logout'
+            ? await runLogout(process.env)
+            : runWhoami(process.env)
+    } catch (error) {
+      stderr.write(`${options.name}: ${describe(error)}\n`)
+      process.exitCode = 1
+    }
+    return
+  }
+
+  // After the .env load, so a grant configured there is visible, and after the
+  // auth commands, which must run without one.
+  if (options.auth !== false) {
+    setProcessTokenSource(options.auth ?? storedGrant(process.env))
   }
 
   // Persistence before anything else: an `--id` that silently does not persist is
@@ -367,6 +408,15 @@ function help(options: ElvantoCliOptions): string {
     ...Object.entries(options.commands ?? {}).map(
       ([name, command]) => [`${options.name} ${name}`, command.describe] as const,
     ),
+    // Last, and after the caller's own: these are plumbing, and a reader looking
+    // for what this binary *does* should not meet sign-in first.
+    ...(options.auth === false
+      ? []
+      : ([
+          [`${options.name} login`, 'Sign in to Elvanto with OAuth and store the grant'],
+          [`${options.name} logout`, 'Forget the stored grant'],
+          [`${options.name} whoami`, 'Show which Elvanto credential is in use'],
+        ] as const)),
   ]
   // Align on the longest invocation rather than a guessed column, so an added
   // command cannot push its description out of line.
@@ -386,9 +436,20 @@ Options:
   --help               This.
 
 Each run starts a new conversation unless --id names one; pass the same --id
-again to continue it. Reads
-credentials from the environment (or .env): ELVANTO_API_KEY, and a model
-provider key such as ANTHROPIC_API_KEY.
+again to continue it.
+
+Elvanto credentials, in the order they are consulted:
+  ELVANTO_API_KEY        Secret API key (Settings > Account Settings)
+  ELVANTO_ACCESS_TOKEN   A fixed OAuth access token
+  a stored grant         Written by \`login\`, refreshed automatically
+
+\`login\` needs an OAuth application (Elvanto: Settings > Integrations) with
+http://127.0.0.1:8975/callback as its redirect URI, and its ELVANTO_CLIENT_ID
+and ELVANTO_CLIENT_SECRET set — in the environment, in .env, or as flags. Those
+are needed only to sign in; refreshing afterwards needs neither.
+
+A model provider key such as ANTHROPIC_API_KEY is also read from the
+environment or .env.
 
 To serve HTTP and the web chat UI, build the app instead — Flue emits the
 server, so there is nothing to run by hand here:

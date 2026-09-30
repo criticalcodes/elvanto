@@ -13,6 +13,52 @@ elvanto people get-all
 
 Or without installing: `npx @criticalcodes/elvanto-cli people get-all`.
 
+## Authenticating
+
+Either an API key, which identifies the **account**, or OAuth, which identifies
+**you**:
+
+```console
+$ export ELVANTO_API_KEY=your-secret-api-key   # Settings → Account Settings
+$ elvanto login                                # or sign in as yourself
+$ elvanto whoami
+Using: stored grant (profile "default")
+Signed in as: Ada Lovelace
+```
+
+`login` needs an OAuth application registered under **Settings → Integrations**,
+with `http://127.0.0.1:8975/callback` as its redirect URI:
+
+```console
+$ ELVANTO_CLIENT_ID=… ELVANTO_CLIENT_SECRET=… elvanto login
+```
+
+There is no shared client id to fall back on, because Elvanto's flow has no PKCE
+— exchanging a code requires the secret, and a public client would mean publishing
+one. The secret is needed only for `login` itself; Elvanto's refresh request
+carries just the refresh token, so later commands need nothing in the environment.
+
+The grant is written to `~/.config/elvanto/credentials.json`, mode 0600 in a 0700
+directory, and refreshed automatically. `elvanto logout` forgets it locally;
+revoking it entirely is done in Elvanto under Settings → Integrations.
+
+**Every Elvanto scope is write-capable** — there is no read-only one — so the token
+this stores can do more than this CLI ever does with it. The default set omits
+`ManageFinancials` and `AdministerAccount`; `--scope` narrows it further.
+
+Precedence, when more than one is available:
+
+| | |
+| --- | --- |
+| 1 | `--api-key` or `--token` on the command line |
+| 2 | A stored grant from `elvanto login` |
+| 3 | `ELVANTO_API_KEY` or `ELVANTO_ACCESS_TOKEN` in the environment |
+
+A stored grant beating an environment variable is the one judgement call there.
+Signing in is a recent, explicit act; an exported variable in a shell profile is
+often neither, and `elvanto login` appearing to do nothing is the worse failure.
+`elvanto whoami` always says which is in play.
+
 ## Commands
 
 Commands mirror the API. `elvanto endpoints` lists all 25:
@@ -96,7 +142,7 @@ elvanto people get-all --all --max-records 5000 -o ndjson > people.ndjson
 | Option | Description |
 | --- | --- |
 | `--api-key <key>` | Secret API key. Defaults to `$ELVANTO_API_KEY`. |
-| `--token <token>` | OAuth access token instead of a key. `$ELVANTO_ACCESS_TOKEN`. |
+| `--token <token>` | A fixed OAuth access token instead of a key. `$ELVANTO_ACCESS_TOKEN`. |
 | `-o, --output <format>` | `table`, `json`, `ndjson`. |
 | `--all` | Fetch every page. |
 | `--max-records <n>` | Stop after this many records. |
@@ -155,7 +201,7 @@ returned records are never logged. `--debug verbose` adds parameter values, exce
 ```console
 elvanto people get-info --id "$id" -o json || case $? in
   4) echo "no such person" ;;
-  3) echo "check your API key" ;;
+  3) echo "run elvanto whoami" ;;
 esac
 ```
 

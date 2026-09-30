@@ -50,9 +50,18 @@ Options:
   --help, -h                      Print this and exit
   --version, -v                   Print the version and exit
 
-Environment:
+Credentials, in the order they are consulted:
   ELVANTO_API_KEY                 Secret API key (Settings > Account Settings)
-  ELVANTO_ACCESS_TOKEN            OAuth access token, instead of an API key
+  ELVANTO_ACCESS_TOKEN            A fixed OAuth access token, instead of a key
+  (a stored grant)                Written by \`elvanto login\`; refreshed
+                                  automatically. Used when neither variable above
+                                  is set.
+
+Environment:
+  ELVANTO_CLIENT_ID               OAuth application client ID, for refreshing a
+  ELVANTO_CLIENT_SECRET           stored grant. Elvanto: Settings > Integrations
+  ELVANTO_PROFILE                 Which stored grant to use (default "default")
+  ELVANTO_CREDENTIALS             Override the credentials file path
   ELVANTO_VALIDATE                throw (default) | warn | off
   ELVANTO_MCP_PAGE_SIZE           Records per call when unspecified (default 25)
   ELVANTO_MCP_MAX_RESPONSE_CHARS  Response size cap (default 100000)
@@ -94,6 +103,14 @@ Example HTTP invocation, for a host that takes a URL:
 export function planStartup(
   argv: readonly string[],
   env: Record<string, string | undefined>,
+  options: {
+    /**
+     * Whether `elvanto login` has left a usable grant on disk. Passed in rather
+     * than read here, so this stays a pure decision over its inputs and testable
+     * without a filesystem.
+     */
+    hasStoredGrant?: boolean
+  } = {},
 ): StartupPlan {
   if (argv.includes('--version') || argv.includes('-v')) {
     return { action: 'print', text: `${SERVER_VERSION}\n`, exitCode: 0 }
@@ -129,12 +146,13 @@ export function planStartup(
   }
 
   const warnings: string[] = []
-  if (!env['ELVANTO_API_KEY'] && !env['ELVANTO_ACCESS_TOKEN']) {
+  if (!env['ELVANTO_API_KEY'] && !env['ELVANTO_ACCESS_TOKEN'] && !options.hasStoredGrant) {
     warnings.push(
-      'Neither ELVANTO_API_KEY nor ELVANTO_ACCESS_TOKEN is set. The server will ' +
-        'start and list its tools, but every tool call will fail until one is ' +
-        'provided. Find your key in Elvanto under Settings > Account Settings > ' +
-        'Secret API Key.',
+      'No credentials. Neither ELVANTO_API_KEY nor ELVANTO_ACCESS_TOKEN is set, and ' +
+        'no OAuth grant is stored. The server will start and list its tools, but ' +
+        'every tool call will fail until one is provided. Either run `elvanto login` ' +
+        '(from @criticalcodes/elvanto-cli) to sign in as yourself, or find your key ' +
+        'in Elvanto under Settings > Account Settings > Secret API Key.',
     )
   }
   if (transport.kind === 'http' && transport.token === undefined) {

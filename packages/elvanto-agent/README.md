@@ -39,10 +39,11 @@ everything an agent is composed of, which is what this is:
 | `useElvantoBase()` | Mounts the tools, the raw endpoints and the base instruction |
 | `findPerson`, `roster`, `nextServing`, `serviceBrief`, `songHistory`, `listCustomFields` | The tools individually, as factories |
 | `endpointTools()`, `CORE_ENDPOINTS`, `ALL_ENDPOINTS` | The 25 raw endpoints as native tools |
-| `elvantoRoutes()` (from `/routes`) | The HTTP surface: agent API, web chat, token guard |
+| `elvantoRoutes()` (from `/routes`) | The HTTP surface: agent API, web chat, Elvanto sign-in |
 | `runElvantoCli()` (from `/cli`) | The terminal runner: one-shot and interactive chat |
 | `elvantoMcpConnection()` | A remote MCP connection, if you have one |
-| `clientFromEnv()` | The shared Elvanto client, with agent-appropriate defaults |
+| `clientFromEnv()`, `clientForPerson()` | The shared Elvanto client, from the environment or from a signed-in person's grant |
+| `elvantoAuthRoutes()`, `requireElvantoSession()`, `createSessionStoreClass()` | Per-user Elvanto sign-in |
 | `personCard`, `rosterEntries`, `serviceHeader`, … | The shaping helpers, for building your own tools |
 
 `src/` is published in the tarball too, so `src/agents/elvanto.ts` — a complete
@@ -83,8 +84,12 @@ that file.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `ELVANTO_API_KEY` | yes | Secret API key. Elvanto → Settings → Account Settings. |
-| `ELVANTO_ACCESS_TOKEN` | — | OAuth token, instead of a key. |
+| `ELVANTO_API_KEY` | unless signing people in | Secret API key. Elvanto → Settings → Account Settings. |
+| `ELVANTO_ACCESS_TOKEN` | — | A fixed OAuth token, instead of a key. |
+| `ELVANTO_CLIENT_ID` | for sign-in | OAuth application. Elvanto → Settings → Integrations. |
+| `ELVANTO_CLIENT_SECRET` | for sign-in | Same application. Elvanto has no PKCE, so this is unavoidable. |
+| `ELVANTO_SESSION_SECRET` | for sign-in | Signs the OAuth `state`. `openssl rand -hex 32`. |
+| `ELVANTO_REDIRECT_URI` | — | Pin the callback when a proxy rewrites the host. |
 | `ELVANTO_MCP_URL` | — | Only for a *remote* MCP server. Not needed for the Elvanto endpoints. |
 | `ELVANTO_MCP_TOKEN` | — | Bearer token for that server. |
 | `ELVANTO_VALIDATE` | — | `warn` (default here), `throw`, or `off`. |
@@ -130,7 +135,8 @@ duplicating them, with three deliberate omissions:
   `endpoints: 'all'` if you have decided to.
 - **`people.search`** — `find_person` does the same job better; offering both
   invites the model to pick the harder one.
-- **`people.currentUser`** — OAuth-only, so with an API key it can only fail.
+- **`people.currentUser`** — OAuth-only, so with an API key it can only fail. When
+  people sign in, the deployment already knows who it is talking to.
 
 ```ts
 useElvantoBase({ endpoints: 'all' })                      // giving data included
@@ -206,35 +212,88 @@ for a real application use
 [`@flue/react`](https://flueframework.com/docs/guide/react/)'s `useFlueAgent()`.
 Pass `chatUi: false` if your application has its own front end.
 
-### It fails closed
+### Signing people in
 
 Flue mounts agents with **no authentication** — its routing guide is explicit that
 anyone who can reach a conversation URL can talk to it, read its full history and
-abort its work. Behind an Elvanto agent is every member record in the account, so
-`elvantoRoutes` will not serve without a shared token:
-
-| `ELVANTO_AGENT_TOKEN` | Behaviour |
-| --- | --- |
-| set | Bearer header for API clients; a sign-in form for browsers, trading the token for a signed HttpOnly cookie |
-| unset | The agent is **not mounted**; every route returns 503 with an explanation |
+abort its work. Behind an Elvanto agent is every member record the credential can
+see. Pass `auth` and each visitor signs in to Elvanto as themselves instead:
 
 ```ts
-elvantoRoutes({ agent: Church })                    // token required
-elvantoRoutes({ agent: Church, auth: 'external' })  // something in front authenticates
+import { authOptionsFromEnv, elvantoRoutes } from '@criticalcodes/elvanto-agent'
+
+const auth = authOptionsFromEnv({ store: () => sessionStore() })
+
+export default elvantoRoutes({
+  agent: Church,
+  title: 'Church office',
+  ...(auth ? { auth } : {}),
+})
 ```
 
-`auth: 'external'` is for a deployment behind [Cloudflare
-Access](https://developers.cloudflare.com/cloudflare-one/policies/access/), an
-authenticating proxy, or a private network — which is the better answer for anything
-real, since it brings identity, audit and revocation that a shared secret cannot. It
-must be written out deliberately: forgetting to configure a token should not look
-like choosing to delegate authentication.
+`authOptionsFromEnv` returns `undefined` unless `ELVANTO_CLIENT_ID`,
+`ELVANTO_CLIENT_SECRET` and `ELVANTO_SESSION_SECRET` are all set — so the same
+route map runs signed-in in production and unauthenticated on a laptop. Setting
+only some of them throws, naming the missing one: running unauthenticated because
+a variable was misspelled is the failure worth being noisy about.
 
-**No per-conversation authorization.** Conversation ids are caller-chosen path
-segments, so any token-holder can read any conversation by guessing its id. That is
-acceptable when every holder may see everything and not otherwise — for per-user
-access, put real identity in front and add an ownership check, as Flue's [routing
-guide](https://flueframework.com/docs/guide/routing/) describes.
+| `auth` | Behaviour |
+| --- | --- |
+| set | `/auth/login`, `/auth/callback`, `/auth/logout`, `/auth/session`; a guard over the agent mount; a sign-in page at `/` for a visitor with no session |
+| unset | No access control at all, and a warning on every start saying so |
+
+**Per-conversation authorization is included.** Conversation ids are caller-chosen
+path segments, so the guard derives each person's id from their session
+(`user-<personId>`) and refuses anything else — the ownership check Flue's
+[routing guide](https://flueframework.com/docs/guide/routing/) insists on. It also
+refuses `initialData` naming a different person, so a signed-in user cannot have
+the agent act with someone else's Elvanto permissions inside a conversation they
+legitimately own.
+
+An external gate — [Cloudflare
+Access](https://developers.cloudflare.com/cloudflare-one/policies/access/), an
+authenticating proxy — still composes in front of all this, and is worth adding if
+you want the agent reachable only from your own people before Elvanto is consulted
+at all. Pass `quiet: true` to silence the warning if that gate is your answer and
+you are not using `auth`.
+
+### Where sessions live
+
+`auth.store` takes a `SessionStore`: sessions keyed by an opaque cookie value,
+grants keyed by the Elvanto person id. Two implementations ship, and the split is
+forced by where the code runs.
+
+```ts
+// Cloudflare — the router and the agent are separate isolates
+export class ElvantoSessionStore extends createSessionStoreClass() {}   // src/cloudflare.ts
+durableObjectSessionStore(env.ELVANTO_SESSIONS)
+
+// Node — one process serves both
+new MemorySessionStore()
+```
+
+A Durable Object rather than a KV namespace because this is a token store: it is
+single-threaded and strongly consistent, so two tool calls refreshing the same
+expiring grant cannot both win and leave the loser's refresh token spent. Declare
+its binding and a migration in `wrangler.jsonc`.
+
+`MemorySessionStore` loses sessions on restart, which is an inconvenience, and
+cannot be shared across instances, which is not — a multi-instance Node deployment
+should supply its own store over whatever database it already runs.
+
+**Tokens never reach the durable record log.** Only the person's id does, via
+`initialData`; the grant is looked up server-side. Flue's own reference is explicit
+that the record log "is still not a secrets channel", and a refresh token there
+would be a standing grant on the member database, replayed on every recovery.
+
+### What sign-in does not cover
+
+- **A scheduled run has no signed-in user.** Cron-triggered work cannot borrow
+  anyone's grant, so it either keeps an account-wide `ELVANTO_API_KEY` or does not
+  run. Decide which deliberately — a sweep quietly running as the whole account is
+  the kind of thing per-user auth was meant to stop.
+- **A mounted `/mcp` route.** MCP hosts carry a bearer token, not a browser cookie,
+  so that surface still uses the environment's credential.
 
 ## Extending it
 

@@ -1,9 +1,12 @@
 import {
   createClient,
+  createTokenSource,
   parseDebugMode,
   parseValidationMode,
   type ElvantoClient,
   type ElvantoClientOptions,
+  type TokenSource,
+  type TokenStore,
 } from '@criticalcodes/elvanto'
 
 /** Env bag, so a Worker's bindings can be passed where `process.env` is absent. */
@@ -44,6 +47,107 @@ export function clientFromEnv(env: Env = ambientEnv()): ElvantoClient {
   const apiKey = env['ELVANTO_API_KEY']
   const accessToken = env['ELVANTO_ACCESS_TOKEN']
 
+  const options = baseOptions(env)
+  if (accessToken) options.auth = { accessToken }
+  else if (apiKey) options.auth = { apiKey }
+  else if (processTokenSource) {
+    options.auth = { getAccessToken: processTokenSource.getAccessToken }
+  }
+
+  return createClient(options)
+}
+
+/**
+ * A credential for the whole process, when there is exactly one caller.
+ *
+ * Process-wide state, which wants justifying. The seam this package prefers is
+ * `useElvantoBase({ client })` — a driver, passed in — and that is what the
+ * deployed path uses, because there each conversation has a different credential
+ * and nothing about it can be process-wide.
+ *
+ * A terminal binary is the opposite case and has a structural problem to go with
+ * it. There is one human, so one credential, and it is known before the agent
+ * runs. But the agent function belongs to the consuming project and is shared with
+ * its Worker build, so it typically calls `clientFromEnv()` with no arguments and
+ * there is nowhere for a runner to pass anything in. The alternative is making
+ * every consumer thread a parameter through an agent module that has no other
+ * reason to know about it.
+ *
+ * So: set once, before the agent runs, by whoever owns the process — which is
+ * {@link runElvantoCli}, from its `auth` option. Explicit environment credentials
+ * still win, and this is never touched on Workers.
+ */
+let processTokenSource: TokenSource | undefined
+
+/** Installs the process-wide credential. Pass `undefined` to clear it. */
+export function setProcessTokenSource(source: TokenSource | undefined): void {
+  processTokenSource = source
+}
+
+/** The process-wide credential, if one was installed. */
+export function getProcessTokenSource(): TokenSource | undefined {
+  return processTokenSource
+}
+
+/**
+ * The client for one signed-in person.
+ *
+ * The same defaults as {@link clientFromEnv} — the reasoning above applies
+ * whoever the caller is — but the credential is supplied rather than found. This
+ * is what makes a deployed agent answer two people differently: each sees what
+ * their Elvanto account sees, and neither borrows the other's reach.
+ *
+ * Takes a {@link TokenSource} rather than a store and a person id, so the whole
+ * credential is one injectable thing. A caller with a grant from somewhere this
+ * package has never heard of — a database, a secrets manager, a test double —
+ * passes it here without going near a `TokenStore`. `env` still supplies the
+ * non-credential defaults (validation, pacing, base URL), and is a plain bag the
+ * caller can substitute.
+ *
+ * ```ts
+ * const { personId } = useInitialData<{ personId: string }>()
+ * const tokens = personTokenSourceFromEnv(sessionStore(), personId)
+ * useElvantoBase({ client: () => clientForPerson(tokens) })
+ * ```
+ */
+export function clientForPerson(
+  tokens: TokenSource,
+  env: Env = ambientEnv(),
+): ElvantoClient {
+  const options = baseOptions(env)
+  options.auth = { getAccessToken: tokens.getAccessToken }
+  return createClient(options)
+}
+
+/**
+ * A {@link TokenSource} for one person, configured from the environment.
+ *
+ * The env-reading edge, kept separate from {@link clientForPerson} and named for
+ * what it does. Library code takes drivers; deciding that a client secret lives in
+ * `ELVANTO_CLIENT_SECRET` is an application's policy, and a function that quietly
+ * made that choice on a caller's behalf would be impossible to use any other way.
+ *
+ * Client credentials are optional here because Elvanto's refresh request carries
+ * only the grant type and the refresh token — the refresh token *is* the
+ * credential. They are sent when present for deployments that front the token
+ * endpoint with something expecting them.
+ */
+export function personTokenSourceFromEnv(
+  store: TokenStore,
+  personId: string,
+  env: Env = ambientEnv(),
+): TokenSource {
+  return createTokenSource({
+    store,
+    key: personId,
+    clientId: env['ELVANTO_CLIENT_ID']?.trim(),
+    clientSecret: env['ELVANTO_CLIENT_SECRET']?.trim(),
+    ...(env['ELVANTO_OAUTH_BASE_URL'] ? { baseUrl: env['ELVANTO_OAUTH_BASE_URL'] } : {}),
+  })
+}
+
+/** Everything both client shapes share, credential aside. */
+function baseOptions(env: Env): ElvantoClientOptions {
   const options: ElvantoClientOptions = {
     validate: parseValidationMode(env['ELVANTO_VALIDATE']) ?? 'warn',
     minRequestIntervalMs: positiveInt(env['ELVANTO_MIN_REQUEST_INTERVAL_MS']) ?? 100,
@@ -63,10 +167,7 @@ export function clientFromEnv(env: Env = ambientEnv()): ElvantoClient {
   if (debug) options.debug = debug
   if (env['ELVANTO_BASE_URL']) options.baseUrl = env['ELVANTO_BASE_URL']
 
-  if (accessToken) options.auth = { accessToken }
-  else if (apiKey) options.auth = { apiKey }
-
-  return createClient(options)
+  return options
 }
 
 function positiveInt(value: string | undefined): number | undefined {

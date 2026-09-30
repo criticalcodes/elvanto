@@ -26,6 +26,47 @@ Omit `auth` and it reads `ELVANTO_API_KEY`, then `ELVANTO_ACCESS_TOKEN`, from th
 environment. Find your key in Elvanto under **Settings → Account Settings →
 Secret API Key**.
 
+### OAuth
+
+`./oauth` builds the authorization-code flow out of small pieces, so a web app, a
+CLI and a Worker can each drive it their own way:
+
+```ts
+import { authorizeUrl, exchangeCode, createTokenSource, MemoryTokenStore } from '@criticalcodes/elvanto'
+
+// 1. Send the user here.
+const url = authorizeUrl({ clientId, redirectUri, scopes: ['ManagePeople'], state })
+
+// 2. At the redirect URI, trade the code for a grant.
+const tokens = await exchangeCode({ clientId, clientSecret, code, redirectUri })
+await store.write('someone', tokens)
+
+// 3. Build a client that renews itself.
+const { getAccessToken } = createTokenSource({ store, key: 'someone' })
+const elvanto = createClient({ auth: { getAccessToken } })
+```
+
+`createTokenSource` single-flights refreshes: several concurrent calls noticing the
+same expired token produce one refresh, not one each — which matters because the
+loser of that race writes a refresh token the winner has already spent.
+
+`TokenStore` is the storage seam. `MemoryTokenStore` ships here;
+`@criticalcodes/elvanto/node` adds `FileTokenStore`, which writes mode 0600 in a
+0700 directory and is kept out of this entry so the main one stays importable on
+Cloudflare Workers.
+
+`createState` and `readState` sign the OAuth `state` with an HMAC and an issue
+time. Unsigned state is attacker-chosen, and a redirect handler that believes it
+can have a victim's session bound to an attacker's Elvanto account.
+
+Two things about Elvanto's flow specifically:
+
+- **No PKCE.** Exchanging a code requires the client secret, so there is no safe
+  public client. Register your own application under Settings → Integrations.
+- **No read-only scope.** All seven scopes are write-capable. This library issues
+  only reads, but a token it holds can do more; `DEFAULT_SCOPES` omits
+  `ManageFinancials` and `AdministerAccount`.
+
 ## Endpoints
 
 Namespaced to mirror the API. All 25 read-only endpoints:
@@ -225,8 +266,8 @@ rather than being caught locally.
 
 ## Scope
 
-Read-only, API key or a supplied OAuth token. Mutating endpoints and the OAuth
-authorization-code flow are not implemented yet.
+Read-only, with API key or OAuth 2 authentication. Mutating endpoints are not
+implemented yet.
 
 ## License
 

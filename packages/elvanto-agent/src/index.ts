@@ -52,7 +52,42 @@ export {
   type ElvantoMcpOptions,
 } from './mcp.ts'
 
-export { ambientEnv, clientFromEnv, type Env } from './client.ts'
+export {
+  ambientEnv,
+  clientForPerson,
+  clientFromEnv,
+  getProcessTokenSource,
+  personTokenSourceFromEnv,
+  setProcessTokenSource,
+  type Env,
+} from './client.ts'
+
+// Per-user Elvanto sign-in, so a deployed agent acts with the caller's own
+// permissions rather than one account-wide API key. Nothing here is needed to run
+// locally against a key.
+export {
+  DEFAULT_BASE_PATH,
+  DEFAULT_COOKIE_NAME,
+  DEFAULT_SESSION_TTL_MS,
+  MemorySessionStore,
+  SESSION_OBJECT_NAME,
+  authOptionsFromEnv,
+  conversationIdFor,
+  createSessionStoreClass,
+  currentSession,
+  durableObjectSessionStore,
+  elvantoAuthRoutes,
+  requireElvantoSession,
+  tokenSourceFor,
+  type DurableObjectNamespaceLike,
+  type DurableObjectStateLike,
+  type DurableObjectStorageLike,
+  type DurableObjectStubLike,
+  type ElvantoAuthOptions,
+  type ElvantoSession,
+  type RequireSessionOptions,
+  type SessionStore,
+} from './auth/index.ts'
 
 export {
   ALL_TOOL_NAMES,

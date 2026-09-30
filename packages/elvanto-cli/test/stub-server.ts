@@ -49,6 +49,15 @@ function isStubResponse(value: unknown): value is StubResponse {
   return typeof value === 'object' && value !== null && HTTP_RESPONSE in value
 }
 
+/** JSON when it parses, form fields when it doesn't. */
+function parseBody(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return Object.fromEntries(new URLSearchParams(raw))
+  }
+}
+
 /**
  * A local HTTP server standing in for api.elvanto.com, so the CLI can be
  * exercised over a real socket rather than with its internals stubbed.
@@ -65,7 +74,10 @@ export async function startStubServer(
     req.on('data', (chunk: Buffer) => chunks.push(chunk))
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString()
-      const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+      // JSON for every data-API call; the OAuth token endpoint is form-encoded,
+      // and parsing that as JSON would throw inside the server rather than
+      // failing the test that meant to exercise it.
+      const body = raw ? parseBody(raw) : {}
       // Strip the /v1/ prefix and the .json extension to recover the API path.
       const path = (req.url ?? '')
         .replace(/^\/v1\//, '')

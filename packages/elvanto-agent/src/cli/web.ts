@@ -22,6 +22,19 @@ export interface WebChatOptions {
   title: string
   /** Conversation id the page opens. */
   conversationId: string
+  /** Name of the signed-in person, when the deployment signs people in. */
+  signedInAs?: string
+  /** Where the sign-out button posts to. Shown only alongside `signedInAs`. */
+  logoutUrl?: string
+  /**
+   * The signed-in person's Elvanto id, sent as `initialData` with the first
+   * message so the agent knows whose grant to read.
+   *
+   * Not a credential — the grant it points at is held server-side — and it is
+   * checked against the session by the guard in front of the mount, so a page
+   * that claimed someone else's id would be refused rather than believed.
+   */
+  personId?: string
 }
 
 export function webChatPage(options: WebChatOptions): string {
@@ -30,6 +43,7 @@ export function webChatPage(options: WebChatOptions): string {
   const config = JSON.stringify({
     mount: options.mount.replace(/\/$/, ''),
     conversationId: options.conversationId,
+    ...(options.personId ? { personId: options.personId } : {}),
   })
 
   return `<!doctype html>
@@ -62,6 +76,12 @@ export function webChatPage(options: WebChatOptions): string {
   }
   header h1 { font-size: .95rem; font-weight: 600; margin: 0; letter-spacing: -.01em; }
   header span { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospace; }
+  header .who { margin-left: auto; font-family: inherit; }
+  header .out { margin: 0; }
+  header .out button {
+    background: none; color: var(--muted); border: 1px solid var(--line);
+    padding: .15rem .55rem; font-size: .78rem; font-weight: 400; border-radius: .4rem;
+  }
   main { flex: 1; overflow-y: auto; padding: 1.1rem; }
   .wrap { max-width: 46rem; margin: 0 auto; display: flex; flex-direction: column; gap: .8rem; }
   .msg { padding: .7rem .9rem; border-radius: .6rem; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -90,6 +110,13 @@ export function webChatPage(options: WebChatOptions): string {
 <header>
   <h1>${escapeHtml(options.title)}</h1>
   <span id="cid"></span>
+  ${
+    options.signedInAs && options.logoutUrl
+      ? `<span class="who">${escapeHtml(options.signedInAs)}</span>` +
+        `<form method="post" action="${escapeHtml(options.logoutUrl)}" class="out">` +
+        `<button type="submit">Sign out</button></form>`
+      : ''
+  }
 </header>
 <main><div class="wrap" id="log"><p class="empty">Ask a question to begin.</p></div></main>
 <footer>
@@ -196,11 +223,21 @@ form.addEventListener('submit', async (event) => {
   const pending = note('thinking…', 'thinking');
 
   try {
+    // initialData is only recorded on the message that creates the conversation
+    // and ignored on every later one, so sending it every time is harmless and
+    // saves the page tracking whether it has been sent yet.
+    const payload = { kind: 'user', body };
+    if (CONFIG.personId) payload.initialData = { personId: CONFIG.personId };
+
     const admission = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ kind: 'user', body }),
+      body: JSON.stringify(payload),
     });
+    if (admission.status === 401) {
+      note('Your session has ended. Reload the page to sign in again.', 'msg error');
+      return;
+    }
     if (!admission.ok) throw new Error('send failed: ' + admission.status);
     const { submissionId } = await admission.json();
 

@@ -10,9 +10,28 @@
 	// (Elvanto -> FlueElvantoAgent), and Cloudflare requires a migration entry
 	// for each one. Append a new tag when you add an agent:
 	// https://flueframework.com/docs/guide/cloudflare-target/#managing-migrations
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueElvantoAgent"] }]
-	// Secrets are deliberately not listed here. ELVANTO_API_KEY, ELVANTO_MCP_TOKEN
-	// and the model provider key are set with `wrangler secret put` — an Elvanto
-	// API key reads every member and giving record in the account, so it does not
-	// belong in a tracked file.
+	//
+	// ElvantoSessionStore is ours rather than Flue's — it is exported from
+	// src/cloudflare.ts and holds each signed-in person's session and OAuth grant.
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["FlueElvantoAgent"] },
+		{ "tag": "v2", "new_sqlite_classes": ["ElvantoSessionStore"] }
+	],
+	// Application-owned bindings only. Flue's own FLUE_* agent bindings are
+	// generated and must not be hand-authored here.
+	//
+	// Both the sign-in routes (in the Worker) and the agent's tools (inside the
+	// agent's Durable Object) reach this binding, which is why it is read through
+	// the ambient `cloudflare:workers` env in src/sessions.cloudflare.ts rather
+	// than from a request context — a Durable Object never sees one.
+	"durable_objects": {
+		"bindings": [
+			{ "name": "ELVANTO_SESSIONS", "class_name": "ElvantoSessionStore" }
+		]
+	}
+	// Secrets are deliberately not listed here. ELVANTO_API_KEY, ELVANTO_MCP_TOKEN,
+	// ELVANTO_CLIENT_ID, ELVANTO_CLIENT_SECRET, ELVANTO_SESSION_SECRET and the
+	// model provider key are set with `wrangler secret put` — an Elvanto API key
+	// reads every member and giving record in the account, and a client secret
+	// exchanges codes for tokens, so neither belongs in a tracked file.
 }

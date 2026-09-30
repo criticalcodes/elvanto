@@ -1,4 +1,5 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { storedGrant } from './credentials.js'
 import { createServer } from './server.js'
 import { serveHttp } from './serve.js'
 import { planStartup } from './startup.js'
@@ -13,7 +14,10 @@ import { planStartup } from './startup.js'
  * tested without spawning a process.
  */
 async function main(): Promise<void> {
-  const plan = planStartup(process.argv.slice(2), process.env)
+  const grant = storedGrant(process.env)
+  const plan = planStartup(process.argv.slice(2), process.env, {
+    hasStoredGrant: grant !== undefined,
+  })
 
   if (plan.action === 'print') {
     process.stdout.write(plan.text)
@@ -30,9 +34,21 @@ async function main(): Promise<void> {
     process.stderr.write(`[elvanto-mcp] Warning: ${warning}\n`)
   }
 
+  // Merged after planning rather than inside it: `planStartup` is a pure decision
+  // over argv and the environment, and a grant comes off the filesystem.
+  const config = grant
+    ? { ...plan.config, clientOptions: { ...plan.config.clientOptions, auth: grant.auth } }
+    : plan.config
+  if (grant) {
+    process.stderr.write(
+      `[elvanto-mcp] Using the stored OAuth grant for profile "${grant.profile}" ` +
+        `(${grant.path}).\n`,
+    )
+  }
+
   if (plan.transport.kind === 'http') {
     const { host, port, token } = plan.transport
-    const running = await serveHttp(plan.config, {
+    const running = await serveHttp(config, {
       host,
       port,
       ...(token ? { token } : {}),
@@ -52,7 +68,7 @@ async function main(): Promise<void> {
     return
   }
 
-  const server = createServer(plan.config)
+  const server = createServer(config)
   await server.connect(new StdioServerTransport())
 
   const shutdown = () => {

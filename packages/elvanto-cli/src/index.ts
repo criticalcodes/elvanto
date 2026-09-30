@@ -3,6 +3,7 @@ import {
   ElvantoApiError,
   ElvantoClient,
   ElvantoError,
+  ElvantoOAuthError,
   ElvantoRequestValidationError,
   ElvantoResponseValidationError,
   ElvantoTransportError,
@@ -19,7 +20,9 @@ import {
   type RequestOptions,
   type ValidationMode,
 } from '@criticalcodes/elvanto'
+import { FileTokenStore } from '@criticalcodes/elvanto/node'
 import { UsageError, buildOptions, collectParams } from './options.js'
+import { attachAuthCommands, profileKey, resolveCredentials } from './auth.js'
 import { isPage, render, type OutputFormat } from './render.js'
 
 const VERSION = '0.1.0'
@@ -56,8 +59,9 @@ export function buildProgram(): Command {
     .name('elvanto')
     .description(
       'Read-only command-line access to the Elvanto API.\n\n' +
-        'Authenticate with ELVANTO_API_KEY (Settings > Account Settings > Secret ' +
-        'API Key) or --api-key. Commands mirror the API: `elvanto people get-all`.',
+        'Authenticate with `elvanto login` (OAuth, signs you in as yourself), with ' +
+        'ELVANTO_API_KEY (Settings > Account Settings > Secret API Key), or with ' +
+        '--api-key. Commands mirror the API: `elvanto people get-all`.',
     )
     .version(VERSION)
     .configureHelp({ sortSubcommands: true })
@@ -149,6 +153,8 @@ export function buildProgram(): Command {
       )
     })
 
+  attachAuthCommands(program)
+
   for (const id of endpointIds) {
     attachEndpoint(program, getEndpoint(id))
   }
@@ -212,12 +218,42 @@ async function runEndpoint(
         ? parseDebugMode(options.debug)
         : undefined
 
+  // A stored OAuth grant is only consulted when no credential was passed on the
+  // command line, so reading the file is skipped entirely in that case — the
+  // common scripted invocation never touches the filesystem.
+  const root = rootOf(command)
+  const apiKeyFromFlag = root.getOptionValueSource('apiKey') === 'cli'
+  const tokenFromFlag = root.getOptionValueSource('token') === 'cli'
+  const store = apiKeyFromFlag || tokenFromFlag ? undefined : new FileTokenStore()
+  const stored = await store?.read(profileKey())
+
+  const credentials = resolveCredentials({
+    apiKey: options.apiKey,
+    apiKeyFromFlag,
+    token: options.token,
+    tokenFromFlag,
+    ...(store ? { store } : {}),
+    storedTokens: stored,
+  })
+
+  // Caught here rather than at Elvanto, which answers an API key on this endpoint
+  // with a bare 401 that reads like a bad key rather than the wrong *kind* of
+  // credential.
+  if (endpoint.auth === 'oauth-only' && credentials.kind === 'api-key') {
+    throw new UsageError(
+      `${toCliPath(endpoint.id).join(' ')} requires OAuth. It reports the person ` +
+        `you are signed in as, and an API key identifies an account rather than a ` +
+        `user. Run \`elvanto login\` first.`,
+    )
+  }
+
   const client = new ElvantoClient({
-    ...(options.token && !options.apiKey
-      ? { auth: { accessToken: options.token } }
-      : options.apiKey
-        ? { auth: { apiKey: options.apiKey } }
-        : {}),
+    auth:
+      credentials.kind === 'oauth'
+        ? { getAccessToken: credentials.tokens!.getAccessToken }
+        : credentials.kind === 'access-token'
+          ? { accessToken: options.token! }
+          : { apiKey: options.apiKey! },
     ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
     ...(validate ? { validate } : {}),
     ...(debug ? { debug } : {}),
@@ -251,6 +287,19 @@ async function runEndpoint(
     maxColumns: options.columns ?? 6,
   })
   process.stdout.write(`${output}\n`)
+}
+
+/**
+ * Walks up to the program, where the global options live.
+ *
+ * `optsWithGlobals()` merges the values but not their provenance, and telling a
+ * flag apart from an environment variable is the whole basis of the credential
+ * precedence in {@link resolveCredentials}.
+ */
+function rootOf(command: Command): Command {
+  let current = command
+  while (current.parent) current = current.parent
+  return current
 }
 
 /** Collects every page into one page-shaped result, so rendering is uniform. */
@@ -295,8 +344,11 @@ export function describeError(error: unknown): { message: string; code: number }
     if (error.isAuthError) {
       return {
         message:
-          `${error.message}\n\nCheck ELVANTO_API_KEY, or --api-key. Find your key ` +
-          `in Elvanto under Settings > Account Settings > Secret API Key.`,
+          `${error.message}\n\nRun \`elvanto whoami\` to see which credentials are ` +
+          `in use. If you signed in with OAuth, \`elvanto login\` again — the grant ` +
+          `may have been revoked in Elvanto under Settings > Integrations. If you ` +
+          `are using an API key, check ELVANTO_API_KEY or --api-key against ` +
+          `Settings > Account Settings > Secret API Key.`,
         code: EXIT.auth,
       }
     }
@@ -316,6 +368,12 @@ export function describeError(error: unknown): { message: string; code: number }
   }
   if (error instanceof ElvantoTransportError) {
     return { message: error.message, code: EXIT.error }
+  }
+  // Before the generic ElvantoError branch, which would call this a usage error.
+  // A declined or expired authorization is neither the user's typo nor a bug —
+  // it is the auth failure a script most wants to branch on.
+  if (error instanceof ElvantoOAuthError) {
+    return { message: error.message, code: EXIT.auth }
   }
   if (error instanceof ElvantoError) {
     return { message: error.message, code: EXIT.usage }
