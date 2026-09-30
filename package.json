@@ -14,7 +14,8 @@
     "test:coverage": "vitest run --coverage",
     "check:secrets": "node scripts/check-no-secrets.mjs",
     "smoke": "tsx scripts/smoke-test.ts",
-    "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo"
+    "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo",
+    "probe:fields": "tsx scripts/probe-custom-fields.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
