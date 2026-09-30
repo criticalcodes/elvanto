@@ -36,6 +36,7 @@ export {
   resolveAuth,
   DEFAULT_BASE_URL,
   DEFAULT_MAX_RETRIES,
+  DEFAULT_SAME_RECORD_WRITE_GAP_MS,
   DEFAULT_TIMEOUT_MS,
   type AccessTokenAuth,
   type ApiKeyAuth,

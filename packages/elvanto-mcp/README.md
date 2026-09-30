@@ -231,7 +231,28 @@ A write is never retried after a timeout, a dropped connection or a 5xx, because
 any of those can follow Elvanto having made the change. The tool result says the
 outcome is unknown and tells the model to read the record before trying again.
 
-The write endpoints' responses have not yet been checked against a real account.
+### What a live account showed
+
+Checked against a real account with throwaway people and a throwaway group,
+since deleted: create, edit, remove and every group write behave as documented,
+and their acknowledgements match (`groups/remove` answers under `group`, not the
+documented `person`). Custom fields take, in `fields`:
+
+| Field type | Write | Clear |
+| --- | --- | --- |
+| checkbox (`select_multi`) | array of option names; replaces the whole selection | `""` — `[]` is accepted and changes nothing |
+| drop-down (`select`) | a string: the option name or its id | `""` |
+| text, date | a string; dates as `YYYY-MM-DD` | `""` |
+
+Elvanto's field reference says a drop-down takes an array; a live account
+rejects one with "Invalid Value for custom field".
+
+**Two edits to the same person within the same wall-clock second fail** with
+"we've run into a problem when saving to the database", and the second is not
+applied. The SDK spaces writes to the same record by a little over a second
+(`sameRecordWriteGapMs`), so callers do not meet this; writes to different
+records are not held up. `peopleFlows.steps.addPerson` has not been exercised
+live.
 
 ## License
 

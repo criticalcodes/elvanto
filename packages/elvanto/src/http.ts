@@ -17,6 +17,8 @@ import {
 export const DEFAULT_BASE_URL = 'https://api.elvanto.com/v1'
 export const DEFAULT_TIMEOUT_MS = 30_000
 export const DEFAULT_MAX_RETRIES = 2
+/** See {@link ElvantoClientOptions.sameRecordWriteGapMs}. */
+export const DEFAULT_SAME_RECORD_WRITE_GAP_MS = 1_100
 
 /**
  * What to do when a response doesn't match our schema.
@@ -103,6 +105,16 @@ export interface ElvantoClientOptions {
    * `Promise.all` of 100 calls is spaced out rather than arriving at once.
    */
   minRequestIntervalMs?: number
+  /**
+   * Minimum gap between the end of one write to a record and the start of the
+   * next write to the same record, in milliseconds. Default 1100.
+   *
+   * Elvanto refuses a second edit to the same person within the same wall-clock
+   * second with "we've run into a problem when saving to the database", and
+   * applies nothing. Seen live, with the edits otherwise valid. Writes to
+   * different records are not held up. Set 0 to turn this off.
+   */
+  sameRecordWriteGapMs?: number
   /** Response validation strictness. Default `"throw"`. */
   validate?: ValidationMode
   /** Called when `validate: "warn"` swallows a schema mismatch. */
@@ -141,6 +153,7 @@ interface ResolvedOptions {
   timeoutMs: number
   maxRetries: number
   minRequestIntervalMs: number
+  sameRecordWriteGapMs: number
   validate: ValidationMode
   onWarning: ((warning: ElvantoValidationWarning) => void) | undefined
   userAgent: string
@@ -236,6 +249,16 @@ export class Transport {
   private pacingGate: Promise<void> = Promise.resolve()
   private lastRequestStartedAt = 0
 
+  /**
+   * The latest write to each record: a promise that settles when it finishes,
+   * and when that was. Each write to a record waits on the one before, so
+   * concurrent writes queue rather than landing in the same second.
+   *
+   * No timer outlives a write. One that did would either hold the process open
+   * after its last request or, unreferenced, let it exit under a waiter.
+   */
+  private readonly recordWrites = new Map<string, { done: Promise<void>; finishedAt: number }>()
+
   constructor(options: ElvantoClientOptions = {}) {
     this.logging = resolveLogging(options.debug, options.logger)
     this.auth = resolveAuth(options.auth)
@@ -257,6 +280,7 @@ export class Transport {
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxRetries: options.maxRetries ?? DEFAULT_MAX_RETRIES,
       minRequestIntervalMs: Math.max(options.minRequestIntervalMs ?? 0, 0),
+      sameRecordWriteGapMs: Math.max(options.sameRecordWriteGapMs ?? DEFAULT_SAME_RECORD_WRITE_GAP_MS, 0),
       validate: options.validate ?? 'throw',
       onWarning: options.onWarning,
       userAgent: options.userAgent
@@ -313,16 +337,53 @@ export class Transport {
     endpoint: string,
     params: Record<string, unknown> = {},
     options: RequestOptions = {},
-    policy: { write?: boolean } = {},
+    policy: { write?: boolean; records?: readonly string[] } = {},
   ): Promise<Envelope> {
     if (!policy.write) return this.send(endpoint, params, options, false)
-    try {
-      return await this.send(endpoint, params, options, true)
-    } catch (error) {
-      if (outcomeUnknown(error)) {
-        throw new ElvantoWriteOutcomeUnknownError({ endpoint, cause: error })
+    return this.spacedFor(policy.records ?? [], async () => {
+      try {
+        return await this.send(endpoint, params, options, true)
+      } catch (error) {
+        if (outcomeUnknown(error)) {
+          throw new ElvantoWriteOutcomeUnknownError({ endpoint, cause: error })
+        }
+        throw error
       }
-      throw error
+    })
+  }
+
+  /** Runs a write once every earlier write to the same records has cleared its gap. */
+  private async spacedFor<T>(records: readonly string[], run: () => Promise<T>): Promise<T> {
+    const gap = this.options.sameRecordWriteGapMs
+    if (gap <= 0 || records.length === 0) return run()
+
+    // Forget writes whose gap has long passed, so the map stays small.
+    const now = Date.now()
+    for (const [record, write] of this.recordWrites) {
+      if (write.finishedAt + gap < now) this.recordWrites.delete(record)
+    }
+
+    const previous = records
+      .map((record) => this.recordWrites.get(record))
+      .filter((write) => write !== undefined)
+    let release!: () => void
+    const entry = {
+      done: new Promise<void>((resolve) => {
+        release = resolve
+      }),
+      finishedAt: Number.POSITIVE_INFINITY,
+    }
+    for (const record of records) this.recordWrites.set(record, entry)
+    try {
+      await Promise.all(previous.map((write) => write.done))
+      // Measured from when the last write finished, which is when Elvanto stamped it.
+      const readyAt = Math.max(0, ...previous.map((write) => write.finishedAt + gap))
+      const wait = readyAt - Date.now()
+      if (wait > 0) await delay(wait)
+      return await run()
+    } finally {
+      entry.finishedAt = Date.now()
+      release()
     }
   }
 

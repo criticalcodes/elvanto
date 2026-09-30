@@ -107,6 +107,7 @@ export class ElvantoClient {
 
     const envelope = await this.transport.request(endpoint.path, body, options, {
       write: isWriteEndpoint(endpoint),
+      records: recordsTouched(endpoint, body),
     })
 
     const mode = options.validate ?? this.defaultValidate
@@ -511,6 +512,22 @@ export class ElvantoClient {
 /** Convenience factory, for `createClient({ apiKey })` over `new`. */
 export function createClient(options: ElvantoClientOptions = {}): ElvantoClient {
   return new ElvantoClient(options)
+}
+
+/**
+ * The records a write touches, for spacing writes to the same one. Keyed by the
+ * resource (`people`, `groups`, …) and each id the call names: `id`, plus the
+ * person on a membership change, since that edits the person too.
+ */
+function recordsTouched(endpoint: EndpointDefinition, body: Record<string, unknown>): string[] {
+  if (!isWriteEndpoint(endpoint)) return []
+  const resource = endpoint.path.split('/')[0]!
+  const records: string[] = []
+  if (typeof body['id'] === 'string' && body['id'] !== '') records.push(`${resource}:${body['id']}`)
+  if (typeof body['person_id'] === 'string' && body['person_id'] !== '') {
+    records.push(`people:${body['person_id']}`)
+  }
+  return records
 }
 
 /** `throw` becomes `warn`; see {@link ElvantoClient.extractAck}. */

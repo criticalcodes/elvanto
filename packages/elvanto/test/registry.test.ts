@@ -143,18 +143,10 @@ describe('registry integrity', () => {
       'financial.categories.getAll',
       'financial.transactions.getAll',
       'financial.transactions.getInfo',
-      // Writes (groups.*, people.create/edit/remove, peopleFlows.steps.addPerson)
-      // have not yet been exercised against a real account.
-      'groups.addPerson',
-      'groups.create',
-      'groups.edit',
-      'groups.remove',
-      'groups.removePerson',
-      'people.create',
       // Requires OAuth, which has not been exercised live either.
       'people.currentUser',
-      'people.edit',
-      'people.remove',
+      // Not exercised live: adding a throwaway person to a real step could
+      // notify the step's admins.
       'peopleFlows.steps.addPerson',
       // The endpoint answered, but no member records existed to shape-check.
       'peopleFlows.steps.people',

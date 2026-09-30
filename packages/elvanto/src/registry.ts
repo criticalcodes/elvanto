@@ -164,7 +164,11 @@ const personWriteParams = {
   fields: fieldValuesParam(
     'Extra and custom fields to set, as name → value, e.g. ' +
       '{"gender": "Female", "birthday": "1990-04-23", "custom_<uuid>": "value"}. ' +
-      'Use people.customFields.getAll to find custom field keys.',
+      'Use people.customFields.getAll to find custom field keys. A checkbox ' +
+      '(select_multi) custom field takes an ARRAY of option names, which replaces ' +
+      'the whole selection — include the options to keep; clear it with "". ' +
+      'Every other custom field, drop-downs included, takes a string (a drop-down ' +
+      'takes the option name). Dates are YYYY-MM-DD. "" clears any field.',
   ),
 }
 
@@ -332,7 +336,7 @@ export const endpoints = {
     }),
     result: { kind: 'ack', key: 'person', item: personAckSchema },
     docs: 'https://www.elvanto.com/api/people/create/',
-    verified: 'docs',
+    verified: 'live',
   }),
 
   'people.edit': defineEndpoint({
@@ -353,7 +357,7 @@ export const endpoints = {
     }),
     result: { kind: 'ack', key: 'person', item: personAckSchema },
     docs: 'https://www.elvanto.com/api/people/edit/',
-    verified: 'docs',
+    verified: 'live',
   }),
 
   'people.remove': defineEndpoint({
@@ -369,7 +373,7 @@ export const endpoints = {
     }),
     result: { kind: 'ack', key: 'person', item: personAckSchema },
     docs: 'https://www.elvanto.com/api/people/remove/',
-    verified: 'docs',
+    verified: 'live',
   }),
 
   // ── People Flows ──────────────────────────────────────────────────────────
@@ -489,7 +493,7 @@ export const endpoints = {
     }),
     result: { kind: 'ack', key: 'group', item: groupAckSchema },
     docs: 'https://www.elvanto.com/api/groups/create/',
-    verified: 'docs',
+    verified: 'live',
   }),
 
   'groups.edit': defineEndpoint({
@@ -506,7 +510,7 @@ export const endpoints = {
     }),
     result: { kind: 'ack', key: 'group', item: groupAckSchema },
     docs: 'https://www.elvanto.com/api/groups/edit/',
-    verified: 'docs',
+    verified: 'live',
   }),
 
   'groups.remove': defineEndpoint({
@@ -519,12 +523,11 @@ export const endpoints = {
     params: z.object({
       id: z.string().min(1).describe('The ID of the group to delete.'),
     }),
-    // Elvanto's example answers under "person", almost certainly a copy from
-    // people/remove. The ack reader falls back to a lone unexpected key, so
-    // either works until a live call settles it.
+    // Elvanto's example answers under "person"; a live call answers under
+    // "group". The ack reader would accept either.
     result: { kind: 'ack', key: 'group', item: groupAckSchema },
     docs: 'https://www.elvanto.com/api/groups/remove/',
-    verified: 'docs',
+    verified: 'live',
   }),
 
   'groups.addPerson': defineEndpoint({
@@ -545,7 +548,7 @@ export const endpoints = {
     }),
     result: { kind: 'ack', key: 'group', item: groupMemberAckSchema },
     docs: 'https://www.elvanto.com/api/groups/addPerson/',
-    verified: 'docs',
+    verified: 'live',
   }),
 
   'groups.removePerson': defineEndpoint({
@@ -562,7 +565,7 @@ export const endpoints = {
     }),
     result: { kind: 'ack', key: 'group', item: groupMemberAckSchema },
     docs: 'https://www.elvanto.com/api/groups/removePerson/',
-    verified: 'docs',
+    verified: 'live',
   }),
 
   // ── Services ──────────────────────────────────────────────────────────────

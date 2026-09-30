@@ -165,3 +165,67 @@ describe('write parameters', () => {
     })
   })
 })
+
+describe('same-record write spacing', () => {
+  /** A client whose stub records when each request arrived. */
+  function timedClient(gap: number) {
+    const arrivals: Array<{ path: string; at: number }> = []
+    const { client } = testClient([{ body: personAck }], {
+      sameRecordWriteGapMs: gap,
+      fetch: (async (input: Parameters<typeof globalThis.fetch>[0]) => {
+        arrivals.push({ path: String(input), at: Date.now() })
+        return Response.json(personAck)
+      }) as typeof globalThis.fetch,
+    })
+    return { client, arrivals }
+  }
+
+  test('a second write to the same person waits out the gap', async () => {
+    const { client, arrivals } = timedClient(150)
+
+    await client.people.edit({ id: 'p', email: 'a@example.org' })
+    await client.people.edit({ id: 'p', email: 'b@example.org' })
+
+    expect(arrivals[1]!.at - arrivals[0]!.at).toBeGreaterThanOrEqual(140)
+  })
+
+  test('concurrent writes to the same person queue rather than collide', async () => {
+    const { client, arrivals } = timedClient(150)
+
+    await Promise.all([
+      client.people.edit({ id: 'p', email: 'a@example.org' }),
+      client.people.edit({ id: 'p', email: 'b@example.org' }),
+      client.people.edit({ id: 'p', email: 'c@example.org' }),
+    ])
+
+    expect(arrivals[1]!.at - arrivals[0]!.at).toBeGreaterThanOrEqual(140)
+    expect(arrivals[2]!.at - arrivals[1]!.at).toBeGreaterThanOrEqual(140)
+  })
+
+  test('writes to different people are not held up', async () => {
+    const { client, arrivals } = timedClient(1_000)
+
+    await client.people.edit({ id: 'p1', email: 'a@example.org' })
+    await client.people.edit({ id: 'p2', email: 'b@example.org' })
+
+    expect(arrivals[1]!.at - arrivals[0]!.at).toBeLessThan(500)
+  })
+
+  test('a membership change spaces against the person it touches', async () => {
+    const { client, arrivals } = timedClient(150)
+
+    await client.people.edit({ id: 'p', email: 'a@example.org' })
+    await client.groups.addPerson({ id: 'g', person_id: 'p' })
+
+    expect(arrivals[1]!.at - arrivals[0]!.at).toBeGreaterThanOrEqual(140)
+  })
+
+  test('reads are never held up', async () => {
+    const { client, arrivals } = timedClient(1_000)
+
+    await client.people.edit({ id: 'p', email: 'a@example.org' })
+    await client.call('people.getInfo', { id: 'p' }, { validate: 'off' }).catch(() => undefined)
+
+    expect(arrivals[1]!.at - arrivals[0]!.at).toBeLessThan(500)
+  })
+})
