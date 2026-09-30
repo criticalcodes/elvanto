@@ -24,6 +24,7 @@ export {
   createServer,
   exposedEndpointIds,
   parseWriteLevel,
+  PEOPLE_UPDATE_TOOL_NAME,
   toolDescription,
   DEFAULT_MAX_RESPONSE_CHARS,
   DEFAULT_PAGE_SIZE,

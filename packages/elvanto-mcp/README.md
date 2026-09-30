@@ -231,6 +231,40 @@ A write is never retried after a timeout, a dropped connection or a 5xx, because
 any of those can follow Elvanto having made the change. The tool result says the
 outcome is unknown and tells the model to read the record before trying again.
 
+### Updating people in bulk: `elvanto_people_update`
+
+Offered from the `write` level. `people_edit` replaces a multi-select custom field
+wholesale, so "take Sam off Kids" sent naively also wipes their Youth role.
+This tool reads each person first, applies additions and removals to what is
+there, and writes the merged set.
+
+```json
+{
+  "apply": false,
+  "updates": [
+    {
+      "id": "…",
+      "add": { "Serving Roles": ["Music"] },
+      "remove": { "Serving Roles": ["Kids"] },
+      "set": { "category_id": "…", "Check Expiry": "2027-03-17", "email": "…" }
+    }
+  ]
+}
+```
+
+- **Dry run by default.** Without `apply: true` it writes nothing and returns each
+  field's before and after. Applying re-reads every record, so the merge is
+  against the record as it is then, not as the dry run saw it.
+- **IDs only.** Names are resolved beforehand, by whoever can ask about an
+  ambiguous one.
+- **Narrow.** `email`, `category_id`, and text, date, single- and multi-select
+  custom fields. Names, family, login and free-text note fields are out of reach.
+  Fields and options are named by key or by name, and checked against the
+  account; a typo is reported, not guessed at.
+- **All or nothing on validation.** If any update is invalid, nothing is written.
+- **Checked after writing.** Each write is followed by a read, and each person is
+  reported `applied`, `partly-applied` or `not-applied` by what the read shows.
+
 ### What a live account showed
 
 Checked against a real account with throwaway people and a throwaway group,

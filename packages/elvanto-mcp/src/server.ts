@@ -26,7 +26,10 @@ import {
   MIN_MAX_RESPONSE_CHARS as SHARED_MIN_RESPONSE_CHARS,
   parseDebugMode,
   parseValidationMode,
+  parsePeopleUpdateRequest,
+  peopleUpdateRequestJsonSchema,
   toMcpToolName,
+  updatePeople,
   type DebugMode,
   type ElvantoClientOptions,
   type EndpointDefinition,
@@ -147,7 +150,7 @@ export function buildTools(
   defaultPageSize = DEFAULT_PAGE_SIZE,
   writes: WriteLevel = 'off',
 ): Tool[] {
-  return exposedEndpointIds(writes).map((id) => {
+  const tools: Tool[] = exposedEndpointIds(writes).map((id) => {
     const endpoint = getEndpoint(id)
     return {
       name: toMcpToolName(id),
@@ -156,6 +159,46 @@ export function buildTools(
       annotations: { title: endpoint.summary, ...hintsFor(endpoint), openWorldHint: true },
     }
   })
+  if (writes !== 'off') tools.push(PEOPLE_UPDATE_TOOL)
+  return tools
+}
+
+/**
+ * Batch changes to people, dry run by default. See `updatePeople` in the SDK.
+ *
+ * Not an endpoint, so not in the registry: it composes reads and edits into the
+ * one thing `people.edit` cannot do safely — add or remove a multi-select option
+ * without replacing the rest. Offered at the `write` level, because it cannot
+ * touch the family, name or login fields that make `people_edit` destructive, and
+ * because it writes nothing unless asked to after a dry run.
+ */
+export const PEOPLE_UPDATE_TOOL_NAME = 'elvanto_people_update'
+
+const PEOPLE_UPDATE_TOOL: Tool = {
+  name: PEOPLE_UPDATE_TOOL_NAME,
+  description:
+    'Change several people at once: add or remove multi-select options (e.g. ' +
+    'positions) without disturbing the others, and set email, people category, or ' +
+    'text, date and single-select custom fields. People are addressed by Elvanto ' +
+    'ID only — resolve names with elvanto_people_search first, and ask the user ' +
+    'about any name that matches none or several people rather than guessing. ' +
+    'By default this is a DRY RUN: it reads each person and returns every ' +
+    'field\'s before and after, writing nothing. Show that to the user, and call ' +
+    'again with apply: true only once they approve. Applying re-reads each person, ' +
+    'writes, and reads back, reporting per person whether the change landed ' +
+    '(applied, partly-applied, not-applied). If any update is invalid, nothing is ' +
+    'written. Use elvanto_people_custom_fields_get_all to see field names and ' +
+    'options.',
+  inputSchema: peopleUpdateRequestJsonSchema() as Tool['inputSchema'],
+  annotations: {
+    title: 'Update people (dry run by default)',
+    readOnlyHint: false,
+    // It overwrites values when applied; the dry run is the guard, and a client
+    // that asks before destructive calls should ask here too.
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
 }
 
 /**
@@ -227,6 +270,16 @@ export function createServer(config: ServerConfig = {}): Server {
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }))
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
+    if (request.params.name === PEOPLE_UPDATE_TOOL_NAME && writes !== 'off') {
+      const parsed = parsePeopleUpdateRequest(request.params.arguments)
+      if (!parsed.ok) return errorResult(`Invalid arguments. ${parsed.message}`)
+      try {
+        return okResult(await updatePeople(getClient(), parsed.request), maxResponseChars)
+      } catch (error) {
+        return errorResult(describeError(error))
+      }
+    }
+
     const endpoint = byToolName.get(request.params.name)
     if (!endpoint) {
       return errorResult(

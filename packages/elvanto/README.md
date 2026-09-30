@@ -108,6 +108,11 @@ An acknowledgement that does not match its schema is reported as a warning, neve
 thrown, since by then the write has happened. Each endpoint's `effect` in the
 registry (`read`, `write`, `destructive`) says what it does.
 
+For changing several people at once, `updatePeople(client, { updates, apply })`
+adds and removes multi-select options without replacing the rest, dry-runs by
+default, and reads each write back. See the MCP server's README for the request
+shape and what a live account showed about custom-field writes.
+
 Or reach any of them dynamically, still fully typed:
 
 ```ts

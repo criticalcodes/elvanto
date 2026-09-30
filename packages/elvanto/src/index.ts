@@ -256,3 +256,18 @@ export {
   type PersonAck,
   type StepPersonAck,
 } from './schemas/writes.js'
+
+export {
+  MAX_PEOPLE_UPDATES,
+  parsePeopleUpdateRequest,
+  peopleUpdateRequestJsonSchema,
+  peopleUpdateRequestSchema,
+  readMulti,
+  updatePeople,
+  type FieldChange,
+  type PeopleUpdateReport,
+  type PeopleUpdateRequest,
+  type PersonUpdate,
+  type PersonUpdateResult,
+  type PersonUpdateStatus,
+} from './people-updates.js'

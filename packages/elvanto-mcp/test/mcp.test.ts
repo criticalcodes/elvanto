@@ -539,10 +539,10 @@ describe('writes', () => {
     expect(removed.isError).toBe(true)
   })
 
-  test('"all" exposes every endpoint', async () => {
+  test('"all" exposes every endpoint, plus the people update tool', async () => {
     const { client } = await connect(() => personAck, { writes: 'all' })
     const names = (await client.listTools()).tools.map((tool) => tool.name)
-    expect(names).toEqual(endpointIds.map((id) => toMcpToolName(id)))
+    expect(names).toEqual([...endpointIds.map((id) => toMcpToolName(id)), 'elvanto_people_update'])
   })
 
   test('a write tool calls Elvanto and returns the acknowledgement', async () => {
@@ -604,5 +604,85 @@ describe('writes', () => {
     expect(configFromEnv({}).writes).toBe('off')
     expect(configFromEnv({ ELVANTO_MCP_WRITES: 'ALL' }).writes).toBe('all')
     expect(() => configFromEnv({ ELVANTO_MCP_WRITES: 'yes' })).toThrow(/ELVANTO_MCP_WRITES/)
+  })
+})
+
+describe('the people update tool', () => {
+  const respond = (path: string, body: Record<string, unknown>): unknown => {
+    if (path === 'people/customFields/getAll') {
+      return {
+        status: 'ok',
+        custom_fields: {
+          custom_field: [
+            {
+              id: 'roles',
+              name: 'Serving Roles',
+              type: 'select_multi',
+              values: { value: [{ id: 'o1', name: 'Youth' }, { id: 'o2', name: 'Music' }] },
+            },
+          ],
+        },
+      }
+    }
+    if (path === 'people/getInfo') {
+      return {
+        status: 'ok',
+        person: [
+          {
+            id: body['id'],
+            firstname: 'Sam',
+            lastname: 'Taylor',
+            custom_roles: { custom_field: [{ id: 'o1', name: 'Youth' }] },
+          },
+        ],
+      }
+    }
+    return { status: 'ok', person: { id: body['id'] } }
+  }
+
+  test('is offered only when writes are on', async () => {
+    const off = await connect(respond)
+    expect((await off.client.listTools()).tools.map((t) => t.name)).not.toContain('elvanto_people_update')
+    const refused = await off.client.callTool({
+      name: 'elvanto_people_update',
+      arguments: { apply: true, updates: [{ id: 'p', add: { 'Serving Roles': ['Music'] } }] },
+    })
+    expect(refused.isError).toBe(true)
+    expect(off.requests).toHaveLength(0)
+
+    const on = await connect(respond, { writes: 'write' })
+    const tool = (await on.client.listTools()).tools.find((t) => t.name === 'elvanto_people_update')!
+    expect(tool.description).toMatch(/DRY RUN/)
+    expect(tool.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true })
+    expect(tool.inputSchema.properties).toHaveProperty('updates')
+  })
+
+  test('dry-runs by default, merging with what is there', async () => {
+    const { client, requests } = await connect(respond, { writes: 'write' })
+
+    const result = await client.callTool({
+      name: 'elvanto_people_update',
+      arguments: { updates: [{ id: 'p', add: { 'Serving Roles': ['Music'] } }] },
+    })
+
+    expect(result.isError).toBeFalsy()
+    const report = JSON.parse(textOf(result as CallToolResult))
+    expect(report.applied).toBe(false)
+    expect(report.results[0]).toMatchObject({
+      name: 'Sam Taylor',
+      status: 'would-change',
+      changes: [{ before: ['Youth'], after: ['Youth', 'Music'] }],
+    })
+    expect(requests.map((r) => r.path)).not.toContain('people/edit')
+  })
+
+  test('explains malformed arguments', async () => {
+    const { client } = await connect(respond, { writes: 'write' })
+    const result = await client.callTool({
+      name: 'elvanto_people_update',
+      arguments: { updates: [{ add: { x: 'Music' } }] },
+    })
+    expect(result.isError).toBe(true)
+    expect(textOf(result as CallToolResult)).toMatch(/Invalid arguments/)
   })
 })
